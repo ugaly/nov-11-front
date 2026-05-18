@@ -68,6 +68,16 @@ const navItems: NavItem[] = [
 ];
 
 const othersItems: NavItem[] = [
+  {
+    icon: <PlugInIcon />,
+    name: "Setup",
+    subItems: [
+      { name: "Service categories", path: "/setup/service-categories" },
+      { name: "All catalogs", path: "/setup/service-catalogs" },
+      { name: "Customers", path: "/setup/customers" },
+      { name: "Engagements", path: "/setup/engagements" },
+    ],
+  },
   // {
   //   icon: <PieChartIcon />,
   //   name: "Charts",
@@ -238,7 +248,12 @@ const AppSidebar: React.FC = () => {
   const subMenuRefs = useRef<Record<string, HTMLDivElement | null>>({});
 
   // const isActive = (path: string) => path === pathname;
-   const isActive = useCallback((path: string) => path === pathname, [pathname]);
+  const isActive = useCallback(
+    (path: string) =>
+      pathname === path ||
+      (path.startsWith("/setup/") && pathname.startsWith(path)),
+    [pathname]
+  );
 
   useEffect(() => {
     // Check if the current path matches any submenu item

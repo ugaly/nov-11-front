@@ -14,6 +14,7 @@ import {
 import ProfileUpdateModal from "@/components/common/ProfileUpdateModal";
 import ChangePasswordModal from "@/components/user-profile/ChangePasswordModal";
 import UserAvatar from "@/components/common/UserAvatar";
+import DatePicker from "@/components/form/date-picker";
 import Button from "@/components/ui/button/Button";
 import Input from "@/components/form/input/InputField";
 import Label from "@/components/form/Label";
@@ -543,14 +544,13 @@ export default function ProfileAccount() {
             />
           </div>
 
-          <div>
-            <Label>Date of birth</Label>
-            <Input
-              type="date"
-              value={dateOfBirth}
-              onChange={(e) => setDateOfBirth(e.target.value)}
-            />
-          </div>
+          <DatePicker
+            id="profile-date-of-birth"
+            label="Date of birth"
+            placeholder="Select date of birth"
+            value={dateOfBirth}
+            onValueChange={setDateOfBirth}
+          />
 
           <div>
             <Label>Nationality</Label>

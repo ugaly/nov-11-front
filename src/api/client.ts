@@ -1,5 +1,5 @@
 import axios from "axios";
-import { getAccessToken } from "@/lib/auth-storage";
+import { clearAuthSession, getAccessToken } from "@/lib/auth-storage";
 import { API_BASE_URL } from "./config";
 
 export const apiClient = axios.create({
@@ -22,3 +22,22 @@ apiClient.interceptors.request.use((config) => {
   }
   return config;
 });
+
+apiClient.interceptors.response.use(
+  (response) => response,
+  (error) => {
+    const status = error?.response?.status;
+    const path: string = error?.config?.url ?? "";
+    if (
+      status === 401 &&
+      !path.startsWith("/api/auth/") &&
+      typeof window !== "undefined"
+    ) {
+      clearAuthSession();
+      if (window.location.pathname !== "/") {
+        window.location.href = "/";
+      }
+    }
+    return Promise.reject(error);
+  }
+);

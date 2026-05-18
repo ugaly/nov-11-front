@@ -1,11 +1,7 @@
-import { Outfit } from 'next/font/google';
+import '@fontsource/outfit/latin.css';
 import './globals.css';
 import { SidebarProvider } from '@/context/SidebarContext';
 import { ThemeProvider } from '@/context/ThemeContext';
-
-const outfit = Outfit({
-  subsets: ["latin"],
-});
 
 export default function RootLayout({
   children,
@@ -14,7 +10,7 @@ export default function RootLayout({
 }>) {
   return (
     <html lang="en">
-      <body className={outfit.className}>
+      <body className="font-outfit antialiased">
         <ThemeProvider>
           <SidebarProvider>{children}</SidebarProvider>
         </ThemeProvider>
