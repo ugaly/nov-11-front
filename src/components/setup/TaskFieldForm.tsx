@@ -8,9 +8,9 @@ import Button from "@/components/ui/button/Button";
 import DatePicker from "@/components/form/date-picker";
 import Input from "@/components/form/input/InputField";
 import Label from "@/components/form/Label";
-import { previewFormLink } from "@/lib/work-item-field-store";
 import FileAttachmentField from "@/components/setup/FileAttachmentField";
-import { Check, Copy } from "lucide-react";
+import type { WorkItemFileAttachment } from "@/api/types/work-item-template";
+import { Check, Copy, Link2 } from "lucide-react";
 import { useCallback, useEffect, useState } from "react";
 
 const inputClass =
@@ -22,6 +22,9 @@ export default function TaskFieldForm({
   savedAt,
   readOnly,
   workItemId,
+  formLinkUrl,
+  onEnsureFormLink,
+  onUploadFieldFile,
   onSave,
   hideActions,
   registerGetValues,
@@ -31,7 +34,13 @@ export default function TaskFieldForm({
   savedAt: string | null;
   readOnly?: boolean;
   workItemId: string;
-  onSave: (values: WorkItemFieldValue[]) => void;
+  formLinkUrl?: string | null;
+  onEnsureFormLink?: () => Promise<string | null>;
+  onUploadFieldFile?: (
+    fieldId: string,
+    file: File
+  ) => Promise<WorkItemFileAttachment>;
+  onSave: (values: WorkItemFieldValue[]) => void | Promise<void>;
   /** Hide save row — parent handles submit (e.g. closure flow). */
   hideActions?: boolean;
   registerGetValues?: (getter: () => WorkItemFieldValue[]) => void;
@@ -40,7 +49,12 @@ export default function TaskFieldForm({
   const [saving, setSaving] = useState(false);
   const [savedFlash, setSavedFlash] = useState(false);
   const [copied, setCopied] = useState(false);
-  const formLink = previewFormLink(workItemId);
+  const [linkUrl, setLinkUrl] = useState<string | null>(formLinkUrl ?? null);
+  const [linkLoading, setLinkLoading] = useState(false);
+
+  useEffect(() => {
+    setLinkUrl(formLinkUrl ?? null);
+  }, [formLinkUrl]);
 
   useEffect(() => {
     const map: Record<string, WorkItemFieldValue> = {};
@@ -68,19 +82,33 @@ export default function TaskFieldForm({
     []
   );
 
-  function handleSave(e: React.FormEvent) {
+  async function handleSave(e: React.FormEvent) {
     e.preventDefault();
     if (readOnly) return;
     setSaving(true);
-    const next = fields.map((f) => draft[f.id] ?? { fieldId: f.id });
-    onSave(next);
-    setSaving(false);
-    setSavedFlash(true);
-    window.setTimeout(() => setSavedFlash(false), 2500);
+    try {
+      const next = fields.map((f) => draft[f.id] ?? { fieldId: f.id });
+      await onSave(next);
+      setSavedFlash(true);
+      window.setTimeout(() => setSavedFlash(false), 2500);
+    } finally {
+      setSaving(false);
+    }
   }
 
-  function copyLink() {
-    void navigator.clipboard.writeText(formLink);
+  async function copyLink() {
+    let url = linkUrl;
+    if (!url && onEnsureFormLink) {
+      setLinkLoading(true);
+      try {
+        url = await onEnsureFormLink();
+        if (url) setLinkUrl(url);
+      } finally {
+        setLinkLoading(false);
+      }
+    }
+    if (!url) return;
+    void navigator.clipboard.writeText(url);
     setCopied(true);
     window.setTimeout(() => setCopied(false), 2000);
   }
@@ -100,14 +128,15 @@ export default function TaskFieldForm({
 
       <div className="flex flex-wrap items-center gap-2 rounded-lg border border-dashed border-brand-200 bg-brand-50/40 px-3 py-2 dark:border-brand-800 dark:bg-brand-950/25">
         <span className="text-xs text-gray-600 dark:text-gray-400">
-          Shareable form (preview):
+          Customer form:
         </span>
         <code className="max-w-[min(100%,14rem)] truncate text-xs text-brand-700 dark:text-brand-300">
-          {formLink}
+          {linkUrl ?? "—"}
         </code>
         <button
           type="button"
-          onClick={copyLink}
+          onClick={() => void copyLink()}
+          disabled={linkLoading}
           className="inline-flex items-center gap-1 rounded-md px-2 py-1 text-xs font-medium text-brand-600 hover:bg-brand-100 dark:hover:bg-brand-900/40"
         >
           {copied ? (
@@ -115,7 +144,13 @@ export default function TaskFieldForm({
           ) : (
             <Copy className="size-3.5" aria-hidden />
           )}
-          {copied ? "Copied" : "Copy"}
+          {linkLoading
+            ? "Creating…"
+            : copied
+              ? "Copied"
+              : linkUrl
+                ? "Copy"
+                : "Create & copy"}
         </button>
       </div>
 
@@ -127,6 +162,11 @@ export default function TaskFieldForm({
             value={draft[field.id]}
             readOnly={readOnly}
             onChange={(patch) => setValue(field.id, patch)}
+            onUploadFieldFile={
+              onUploadFieldFile
+                ? (file) => onUploadFieldFile(field.id, file)
+                : undefined
+            }
           />
         ))}
       </div>
@@ -138,7 +178,7 @@ export default function TaskFieldForm({
               {saving ? "Saving…" : "Save responses"}
             </Button>
             {savedFlash ? (
-              <span className="text-sm text-emerald-600">Saved locally</span>
+              <span className="text-sm text-emerald-600">Saved</span>
             ) : null}
           </div>
         ) : (
@@ -169,11 +209,13 @@ function FieldInput({
   value,
   readOnly,
   onChange,
+  onUploadFieldFile,
 }: {
   field: WorkItemFieldDefinition;
   value?: WorkItemFieldValue;
   readOnly?: boolean;
   onChange: (patch: Partial<WorkItemFieldValue>) => void;
+  onUploadFieldFile?: (file: File) => Promise<WorkItemFileAttachment>;
 }) {
   const label = (
     <Label>
@@ -283,6 +325,7 @@ function FieldInput({
           readOnly={disabled}
           allowMultiple={field.allowMultiple}
           onChange={onChange}
+          onUploadFile={onUploadFieldFile}
         />
       );
     case "CUSTOMER_LINK":

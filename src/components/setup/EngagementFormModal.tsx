@@ -3,7 +3,9 @@
 import { getApiErrorMessage } from "@/api/errors";
 import {
   createEngagement,
+  listCustomerEngagements,
   listCustomers,
+  listServiceCatalogs,
   listServiceCategories,
 } from "@/api/template-config/template-config.api";
 import type {
@@ -41,6 +43,32 @@ function pickDefaultCatalog(
   return category?.catalogs?.[0]?.id ?? "";
 }
 
+function mergeCatalogsIntoCategories(
+  categories: ServiceCategoryResponse[],
+  allCatalogs: ServiceCatalogResponse[]
+): ServiceCategoryResponse[] {
+  const byCategory = new Map<string, ServiceCatalogResponse[]>();
+  for (const catalog of allCatalogs) {
+    const list = byCategory.get(catalog.categoryId) ?? [];
+    list.push(catalog);
+    byCategory.set(catalog.categoryId, list);
+  }
+  return categories.map((cat) => ({
+    ...cat,
+    catalogs:
+      (cat.catalogs?.length ?? 0) > 0
+        ? cat.catalogs!
+        : (byCategory.get(cat.id) ?? []),
+  }));
+}
+
+function countAvailableCatalogs(
+  catalogs: ServiceCatalogResponse[] | undefined,
+  excludedCatalogIds: Set<string>
+): number {
+  return (catalogs ?? []).filter((c) => !excludedCatalogIds.has(c.id)).length;
+}
+
 export default function EngagementFormModal({
   open,
   companyId,
@@ -67,12 +95,38 @@ export default function EngagementFormModal({
   const [periodEnd, setPeriodEnd] = useState("");
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [assignedCatalogIds, setAssignedCatalogIds] = useState<string[]>([]);
+  const [loadingAssignments, setLoadingAssignments] = useState(false);
 
-  const selectedCategory = categories.find((c) => c.id === categoryId);
-  const catalogsInCategory = useMemo(
-    () => selectedCategory?.catalogs ?? [],
-    [selectedCategory]
+  const resolvedCustomerId = fixedCustomerId ?? customerId;
+
+  const excludedCatalogIds = useMemo(
+    () => new Set(assignedCatalogIds),
+    [assignedCatalogIds]
   );
+
+  const categoryOptions = useMemo(
+    () => categories.filter((c) => c.active !== false),
+    [categories]
+  );
+
+  const selectedCategory = categoryOptions.find((c) => c.id === categoryId);
+  const catalogsInCategory = useMemo(
+    () =>
+      (selectedCategory?.catalogs ?? []).filter(
+        (c) => !excludedCatalogIds.has(c.id)
+      ),
+    [selectedCategory, excludedCatalogIds]
+  );
+
+  const hasAssignableCatalog = useMemo(() => {
+    for (const cat of categories) {
+      if (countAvailableCatalogs(cat.catalogs, excludedCatalogIds) > 0) {
+        return true;
+      }
+    }
+    return false;
+  }, [categories, excludedCatalogIds]);
   const selectedCatalog = catalogsInCategory.find((c) => c.id === catalogId);
   const needsPeriodStart = engagementRequiresPeriodStart(
     selectedCatalog?.recurrenceType
@@ -82,16 +136,11 @@ export default function EngagementFormModal({
     if (!open) return;
     void (async () => {
       try {
-        const categoryList = await listServiceCategories(companyId);
-        setCategories(categoryList);
-        const defaultCategory = pickDefaultCategory(categoryList);
-        if (defaultCategory) {
-          setCategoryId(defaultCategory.id);
-          setCatalogId(pickDefaultCatalog(defaultCategory));
-        } else {
-          setCategoryId("");
-          setCatalogId("");
-        }
+        const [categoryList, catalogList] = await Promise.all([
+          listServiceCategories(companyId),
+          listServiceCatalogs(companyId),
+        ]);
+        setCategories(mergeCatalogsIntoCategories(categoryList, catalogList));
 
         if (fixedCustomerId) {
           setCustomerId(fixedCustomerId);
@@ -107,23 +156,78 @@ export default function EngagementFormModal({
   }, [open, companyId, fixedCustomerId]);
 
   useEffect(() => {
+    if (!open || !resolvedCustomerId) {
+      setAssignedCatalogIds([]);
+      return;
+    }
+    let cancelled = false;
+    setLoadingAssignments(true);
+    void (async () => {
+      try {
+        const existing = await listCustomerEngagements(
+          companyId,
+          resolvedCustomerId
+        );
+        if (!cancelled) {
+          setAssignedCatalogIds(existing.map((e) => e.catalogId));
+        }
+      } catch {
+        if (!cancelled) setAssignedCatalogIds([]);
+      } finally {
+        if (!cancelled) setLoadingAssignments(false);
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [open, companyId, resolvedCustomerId]);
+
+  useEffect(() => {
     if (!open) {
       setTitle("");
       setDescription("");
       setPeriodStart("");
       setPeriodEnd("");
       setError(null);
+      setAssignedCatalogIds([]);
     }
   }, [open]);
 
   useEffect(() => {
-    if (!categoryId || !open) return;
-    const cat = categories.find((c) => c.id === categoryId);
-    const list = cat?.catalogs ?? [];
+    if (!open || categories.length === 0 || loadingAssignments) return;
+
+    const defaultCategory = pickDefaultCategory(categoryOptions);
+    if (!defaultCategory) {
+      setCategoryId("");
+      setCatalogId("");
+      return;
+    }
+
+    setCategoryId((prev) => {
+      const categoryStillValid = categoryOptions.some((c) => c.id === prev);
+      const nextCategoryId = categoryStillValid ? prev : defaultCategory.id;
+      const cat =
+        categoryOptions.find((c) => c.id === nextCategoryId) ?? defaultCategory;
+      const list = (cat.catalogs ?? []).filter(
+        (c) => !excludedCatalogIds.has(c.id)
+      );
+      setCatalogId((prevCatalog) =>
+        list.some((c) => c.id === prevCatalog) ? prevCatalog : list[0]?.id ?? ""
+      );
+      return nextCategoryId;
+    });
+  }, [open, categories, categoryOptions, excludedCatalogIds, loadingAssignments]);
+
+  useEffect(() => {
+    if (!categoryId || !open || loadingAssignments) return;
+    const cat = categoryOptions.find((c) => c.id === categoryId);
+    const list = (cat?.catalogs ?? []).filter(
+      (c) => !excludedCatalogIds.has(c.id)
+    );
     setCatalogId((prev) =>
       list.some((c) => c.id === prev) ? prev : list[0]?.id ?? ""
     );
-  }, [categoryId, categories, open]);
+  }, [categoryId, categoryOptions, excludedCatalogIds, open, loadingAssignments]);
 
   async function handleSubmit(e: React.FormEvent) {
     e.preventDefault();
@@ -134,6 +238,10 @@ export default function EngagementFormModal({
     }
     if (needsPeriodStart && !periodStart.trim()) {
       setError("Period start is required for this catalog’s recurrence.");
+      return;
+    }
+    if (excludedCatalogIds.has(catalogId)) {
+      setError("This customer already has an engagement for that service catalog.");
       return;
     }
     setSubmitting(true);
@@ -190,24 +298,49 @@ export default function EngagementFormModal({
           </div>
         )}
 
+        {loadingAssignments ? (
+          <p className="text-xs text-gray-500">Checking existing engagements…</p>
+        ) : null}
+
+        {!loadingAssignments && !hasAssignableCatalog ? (
+          <p className="rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-sm text-amber-800 dark:border-amber-900/50 dark:bg-amber-950/30 dark:text-amber-200">
+            This customer already has an engagement for every available service
+            catalog.
+          </p>
+        ) : null}
+
         <div>
           <Label>Service category *</Label>
           <select
             className={selectClass}
             value={categoryId}
+            disabled={
+              loadingAssignments || categoryOptions.length === 0
+            }
             onChange={(e) => setCategoryId(e.target.value)}
           >
-            {categories.length === 0 ? (
-              <option value="">No categories available</option>
+            {categoryOptions.length === 0 ? (
+              <option value="">
+                {loadingAssignments
+                  ? "Loading…"
+                  : "No service categories"}
+              </option>
             ) : (
-              categories.map((c) => (
-                <option key={c.id} value={c.id}>
-                  {c.name}
-                  {(c.catalogs?.length ?? 0) > 0
-                    ? ` (${c.catalogs!.length} catalog${c.catalogs!.length === 1 ? "" : "s"})`
-                    : " (no catalogs)"}
-                </option>
-              ))
+              categoryOptions.map((c) => {
+                const available = countAvailableCatalogs(
+                  c.catalogs,
+                  excludedCatalogIds
+                );
+                const total = c.catalogs?.length ?? 0;
+                return (
+                  <option key={c.id} value={c.id}>
+                    {c.name}
+                    {total > 0
+                      ? ` (${available} of ${total} catalog${total === 1 ? "" : "s"} available)`
+                      : ""}
+                  </option>
+                );
+              })
             )}
           </select>
         </div>
@@ -217,13 +350,17 @@ export default function EngagementFormModal({
           <select
             className={selectClass}
             value={catalogId}
-            disabled={!categoryId || catalogsInCategory.length === 0}
+            disabled={
+              loadingAssignments ||
+              !categoryId ||
+              catalogsInCategory.length === 0
+            }
             onChange={(e) => setCatalogId(e.target.value)}
           >
             {catalogsInCategory.length === 0 ? (
               <option value="">
                 {categoryId
-                  ? "No catalogs in this category"
+                  ? "No more catalogs in this category for this customer"
                   : "Select a category first"}
               </option>
             ) : (
@@ -280,9 +417,11 @@ export default function EngagementFormModal({
             size="sm"
             disabled={
               submitting ||
+              loadingAssignments ||
               !categoryId ||
               !catalogId ||
-              catalogsInCategory.length === 0
+              catalogsInCategory.length === 0 ||
+              !hasAssignableCatalog
             }
           >
             {submitting ? "Creating…" : "Create"}

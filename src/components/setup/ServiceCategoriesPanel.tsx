@@ -12,6 +12,7 @@ import type {
   ServiceCategoryResponse,
 } from "@/api/types/template-config";
 import DeactivateConfirmModal from "@/components/setup/DeactivateConfirmModal";
+import SetupEmptyState from "@/components/setup/SetupEmptyState";
 import ExportListMenu from "@/components/setup/ExportListMenu";
 import PricingFields from "@/components/setup/PricingFields";
 import {
@@ -232,14 +233,22 @@ function CategoryList({
               <ListError message={error} onRetry={() => void load()} />
             </div>
           ) : items.length === 0 ? (
-            <p className="mt-6 border-t border-dashed border-gray-300 px-6 py-12 text-center text-sm text-gray-500 dark:border-gray-700">
-              {appliedSearch.trim()
-                ? "No categories match your search."
-                : "No categories yet."}
-              {canEdit && !appliedSearch.trim()
-                ? " Add a category to start building templates."
-                : null}
-            </p>
+            <div className="mt-6 border-t border-gray-200 pt-6 dark:border-gray-800">
+              <SetupEmptyState
+                icon={Layers}
+                title={
+                  appliedSearch.trim()
+                    ? "No categories match your search."
+                    : "No categories yet."
+                }
+                description={
+                  canEdit && !appliedSearch.trim()
+                    ? "Add a category to start building templates."
+                    : undefined
+                }
+                variant="inline"
+              />
+            </div>
           ) : (
             <div className={setupListTableSectionClass}>
               <Table className={setupTableClass}>

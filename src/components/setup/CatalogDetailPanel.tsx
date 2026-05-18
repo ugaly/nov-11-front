@@ -14,6 +14,7 @@ import type {
 import CatalogNodeTableView from "@/components/setup/CatalogNodeTableView";
 import DeactivateConfirmModal from "@/components/setup/DeactivateConfirmModal";
 import ExportListMenu from "@/components/setup/ExportListMenu";
+import SetupEmptyState from "@/components/setup/SetupEmptyState";
 import PricingFields from "@/components/setup/PricingFields";
 import { SetupRowActionDeactivate } from "@/components/setup/SetupRowActions";
 import { setupFormModalClass } from "@/components/setup/setupFormModal";
@@ -39,6 +40,7 @@ import {
   validateCatalogNodePricingForm,
   type PricingFormState,
 } from "@/lib/template-pricing";
+import { ListTree } from "lucide-react";
 import Link from "next/link";
 import React, { useCallback, useEffect, useState } from "react";
 
@@ -231,7 +233,12 @@ export default function CatalogDetailPanel({ catalogId }: { catalogId: string })
           )}
         </div>
       ) : (
-        <p className="text-sm text-gray-500">No template nodes yet.</p>
+        <SetupEmptyState
+          icon={ListTree}
+          title="No template nodes yet."
+          description="Add a root GROUP node to build the catalog structure."
+          variant="bordered"
+        />
       )}
 
       <DeactivateConfirmModal

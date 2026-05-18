@@ -8,11 +8,15 @@ import Link from "next/link";
 import { CalendarRange, ExternalLink } from "lucide-react";
 
 export default function EngagementDetailBody({
+  companyId,
   engagement,
   showOpenLink = false,
+  onEngagementRefresh,
 }: {
+  companyId: string;
   engagement: CustomerEngagementResponse;
   showOpenLink?: boolean;
+  onEngagementRefresh?: () => void | Promise<void>;
 }) {
   const periodText = engagement.period
     ? formatEngagementPeriod(engagement.period)
@@ -54,7 +58,11 @@ export default function EngagementDetailBody({
         ) : null}
       </div>
 
-      <EngagementWorkPanel engagement={engagement} />
+      <EngagementWorkPanel
+        companyId={companyId}
+        engagement={engagement}
+        onEngagementRefresh={onEngagementRefresh}
+      />
     </div>
   );
 }

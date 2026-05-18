@@ -2,12 +2,11 @@
 
 import type { WorkItemFileAttachment } from "@/api/types/work-item-template";
 import FilePreviewModal from "@/components/setup/FilePreviewModal";
+import { attachmentPreviewSrc } from "@/lib/work-item-api-files";
 import {
   attachmentsToFieldPatch,
-  fileToAttachment,
   formatFileSize,
   getAttachments,
-  MAX_FILE_DATA_URL_BYTES,
 } from "@/lib/work-item-file-utils";
 import type { WorkItemFieldValue } from "@/api/types/work-item-template";
 import {
@@ -75,7 +74,11 @@ function AttachmentTile({
   onOpen: () => void;
   onRemove: () => void;
 }) {
-  const isImage = file.kind === "image" && file.dataUrl;
+  const previewSrc = attachmentPreviewSrc(file);
+  const isImage =
+    (file.kind === "image" ||
+      file.mimeType.startsWith("image/")) &&
+    Boolean(previewSrc);
 
   return (
     <div
@@ -90,9 +93,11 @@ function AttachmentTile({
         {isImage ? (
           // eslint-disable-next-line @next/next/no-img-element
           <img
-            src={file.dataUrl}
-            alt=""
+            src={previewSrc}
+            alt={file.name}
             className="size-full object-cover"
+            loading="lazy"
+            referrerPolicy="no-referrer"
           />
         ) : (
           <div
@@ -141,12 +146,15 @@ export default function FileAttachmentField({
   readOnly,
   allowMultiple,
   onChange,
+  onUploadFile,
 }: {
   label?: ReactNode | null;
   value?: WorkItemFieldValue;
   readOnly?: boolean;
   allowMultiple?: boolean;
   onChange: (patch: Partial<WorkItemFieldValue>) => void;
+  /** When set, uploads to API instead of base64 local storage. */
+  onUploadFile?: (file: File) => Promise<WorkItemFileAttachment>;
 }) {
   const attachments = getAttachments(value);
   const [previewFile, setPreviewFile] = useState<WorkItemFileAttachment | null>(
@@ -157,18 +165,28 @@ export default function FileAttachmentField({
 
   async function handleFiles(list: FileList | null) {
     if (!list?.length || readOnly) return;
+    if (!onUploadFile) {
+      setUploadError(
+        "File upload is not ready. Wait for the form to load, then try again."
+      );
+      return;
+    }
     setUploadError(null);
     setUploading(true);
     try {
       const incoming: WorkItemFileAttachment[] = [];
       for (const file of Array.from(list)) {
-        if (file.size > MAX_FILE_DATA_URL_BYTES) {
+        try {
+          incoming.push(await onUploadFile(file));
+        } catch (err) {
+          const message =
+            err instanceof Error ? err.message : "Upload failed.";
           setUploadError(
-            `"${file.name}" exceeds ${formatFileSize(MAX_FILE_DATA_URL_BYTES)} and was skipped.`
+            message.includes("No company")
+              ? "Cannot upload files until the page finishes loading."
+              : `"${file.name}": ${message}`
           );
-          continue;
         }
-        incoming.push(await fileToAttachment(file));
       }
       if (!incoming.length) return;
       const next = allowMultiple

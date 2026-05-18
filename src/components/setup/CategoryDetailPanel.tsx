@@ -9,6 +9,7 @@ import type { ServiceCatalogResponse } from "@/api/types/template-config";
 import CatalogFormModal from "@/components/setup/CatalogFormModal";
 import DeactivateConfirmModal from "@/components/setup/DeactivateConfirmModal";
 import ExportListMenu from "@/components/setup/ExportListMenu";
+import SetupEmptyState from "@/components/setup/SetupEmptyState";
 import {
   SetupRowActionDeactivate,
   SetupRowActionLink,
@@ -23,6 +24,7 @@ import {
 } from "@/lib/export/service-catalogs-export";
 import { formatCatalogRecurrence } from "@/lib/template-recurrence";
 import { formatPricing } from "@/lib/template-pricing";
+import { FolderOpen } from "lucide-react";
 import Link from "next/link";
 import React, { useCallback, useEffect, useState } from "react";
 
@@ -145,9 +147,11 @@ export default function CategoryDetailPanel({
             </div>
           </div>
           {catalogs.length === 0 ? (
-            <p className="text-sm text-gray-500">
-              No catalogs in this category yet.
-            </p>
+            <SetupEmptyState
+              icon={FolderOpen}
+              title="No catalogs in this category yet."
+              variant="bordered"
+            />
           ) : (
             <div className="overflow-x-auto rounded-xl border border-gray-200 dark:border-gray-800">
               <table className="min-w-full text-sm">

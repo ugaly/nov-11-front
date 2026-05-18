@@ -17,10 +17,12 @@ import {
   SetupRowActionLink,
   SetupRowActions,
 } from "@/components/setup/SetupRowActions";
+import SetupEmptyState from "@/components/setup/SetupEmptyState";
 import SetupPageShell from "@/components/setup/SetupPageShell";
 import Button from "@/components/ui/button/Button";
 import { formatEngagementPeriod } from "@/lib/template-recurrence";
 import { formatPricing } from "@/lib/template-pricing";
+import { Briefcase } from "lucide-react";
 import React, { useCallback, useEffect, useMemo, useState } from "react";
 
 export default function EngagementsPanel() {
@@ -99,7 +101,12 @@ function EngagementList({ companyId }: { companyId: string }) {
       ) : error ? (
         <ListError message={error} onRetry={() => void load()} />
       ) : items.length === 0 ? (
-        <p className="text-sm text-gray-500">No engagements yet.</p>
+        <SetupEmptyState
+          icon={Briefcase}
+          title="No engagements yet."
+          description="Create an engagement from a customer and service catalog."
+          variant="bordered"
+        />
       ) : (
         <>
           <p className="text-xs text-gray-500 dark:text-gray-400">

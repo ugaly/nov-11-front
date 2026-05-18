@@ -69,7 +69,11 @@ export default function EngagementDetailPanel({
       ) : error ? (
         <p className="text-sm text-error-600">{error}</p>
       ) : engagement ? (
-        <EngagementDetailBody engagement={engagement} />
+        <EngagementDetailBody
+          companyId={companyId}
+          engagement={engagement}
+          onEngagementRefresh={load}
+        />
       ) : null}
     </div>
   );

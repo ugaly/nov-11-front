@@ -2,6 +2,7 @@
 
 import type { EngagementWorkItemResponse } from "@/api/types/template-config";
 import { setupFormModalClass } from "@/components/setup/setupFormModal";
+import SetupEmptyState from "@/components/setup/SetupEmptyState";
 import WorkItemStatusBadge from "@/components/setup/WorkItemStatusBadge";
 import { Modal } from "@/components/ui/modal";
 import {
@@ -11,7 +12,7 @@ import {
   type WorkItemTreeNode,
 } from "@/lib/work-item-tree";
 import { formatPricing } from "@/lib/template-pricing";
-import { FolderTree, X } from "lucide-react";
+import { FolderTree, ListTree, X } from "lucide-react";
 
 export default function CatalogStructureModal({
   open,
@@ -53,7 +54,12 @@ export default function CatalogStructureModal({
 
       <div className="mt-6 max-h-[min(60vh,28rem)] overflow-y-auto rounded-xl border border-gray-200 bg-gray-50/50 p-4 dark:border-gray-700 dark:bg-gray-900/30">
         {tree.length === 0 ? (
-          <p className="text-sm text-gray-500">No structure defined.</p>
+          <SetupEmptyState
+            icon={ListTree}
+            title="No structure defined."
+            variant="inline"
+            className="py-6"
+          />
         ) : (
           <ol className="space-y-4">
             {tree.map((node, index) => (

@@ -1,41 +1,57 @@
 "use client";
 
+import { getApiErrorMessage } from "@/api/errors";
+import { patchWorkItemStatus } from "@/api/work-item/work-item.api";
 import type {
   EngagementWorkItemResponse,
   WorkItemStatus,
 } from "@/api/types/template-config";
-import {
-  loadStatusOverrides,
-  saveStatusOverride,
-} from "@/lib/work-item-status-store";
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useState } from "react";
 
 export function useEngagementWorkItemStatuses(
+  companyId: string | null,
   engagementId: string,
-  workItems: EngagementWorkItemResponse[]
+  workItems: EngagementWorkItemResponse[],
+  onRefresh?: () => void | Promise<void>
 ) {
-  const [overrides, setOverrides] = useState<Record<string, WorkItemStatus>>(
+  const [optimistic, setOptimistic] = useState<Record<string, WorkItemStatus>>(
     {}
   );
-  const [ready, setReady] = useState(false);
-
-  useEffect(() => {
-    setOverrides(loadStatusOverrides(engagementId));
-    setReady(true);
-  }, [engagementId]);
+  const [statusError, setStatusError] = useState<string | null>(null);
 
   const getStatus = useCallback(
     (item: EngagementWorkItemResponse): WorkItemStatus =>
-      overrides[item.id] ?? item.status,
-    [overrides]
+      optimistic[item.id] ?? item.status,
+    [optimistic]
   );
 
   const setStatus = useCallback(
-    (workItemId: string, status: WorkItemStatus) => {
-      saveStatusOverride(engagementId, workItemId, status);
-      setOverrides((prev) => ({ ...prev, [workItemId]: status }));
+    async (workItemId: string, status: WorkItemStatus) => {
+      if (!companyId) return;
+      const previous = optimistic[workItemId];
+      setOptimistic((prev) => ({ ...prev, [workItemId]: status }));
+      setStatusError(null);
+      try {
+        await patchWorkItemStatus(companyId, engagementId, workItemId, {
+          status,
+        });
+        await onRefresh?.();
+        setOptimistic((prev) => {
+          const next = { ...prev };
+          delete next[workItemId];
+          return next;
+        });
+      } catch (err) {
+        setOptimistic((prev) => {
+          const next = { ...prev };
+          if (previous !== undefined) next[workItemId] = previous;
+          else delete next[workItemId];
+          return next;
+        });
+        setStatusError(getApiErrorMessage(err, "Could not update status."));
+      }
     },
-    [engagementId]
+    [companyId, engagementId, onRefresh]
   );
 
   const mergedWorkItems = workItems.map((w) => ({
@@ -43,5 +59,11 @@ export function useEngagementWorkItemStatuses(
     status: getStatus(w),
   }));
 
-  return { getStatus, setStatus, mergedWorkItems, ready };
+  return {
+    getStatus,
+    setStatus,
+    mergedWorkItems,
+    ready: !!companyId,
+    statusError,
+  };
 }

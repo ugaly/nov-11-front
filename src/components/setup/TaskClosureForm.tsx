@@ -23,6 +23,9 @@ export default function TaskClosureForm({
   onSaveValues,
   onSubmit,
   onEditFields,
+  formLinkUrl,
+  onUploadFieldFile,
+  responsesLocked,
 }: {
   status: ClosureStatus;
   fields: WorkItemFieldDefinition[];
@@ -35,6 +38,12 @@ export default function TaskClosureForm({
   onSaveValues: (values: WorkItemFieldValue[]) => void;
   onSubmit: (values: WorkItemFieldValue[], remark: string) => void;
   onEditFields?: () => void;
+  formLinkUrl?: string | null;
+  onUploadFieldFile?: (
+    fieldId: string,
+    file: File
+  ) => Promise<import("@/api/types/work-item-template").WorkItemFileAttachment>;
+  responsesLocked?: boolean;
 }) {
   const [draftRemark, setDraftRemark] = useState(remark);
   const [submitting, setSubmitting] = useState(false);
@@ -79,8 +88,10 @@ export default function TaskClosureForm({
             fields={fields}
             values={values}
             savedAt={savedAt}
-            readOnly={false}
+            readOnly={responsesLocked ?? false}
             workItemId={workItemId}
+            formLinkUrl={formLinkUrl}
+            onUploadFieldFile={onUploadFieldFile}
             onSave={onSaveValues}
             hideActions
             registerGetValues={(fn) => {

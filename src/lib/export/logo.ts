@@ -1,5 +1,5 @@
 import {
-  LOGIN_LOGO_PATH,
+  EXPORT_LOGO_PATH,
   LOGO_FALLBACK_PATHS,
 } from "@/lib/export/constants";
 
@@ -44,9 +44,9 @@ async function tryLoadLogo(path: string): Promise<LogoDataUrl | null> {
   }
 }
 
-/** Loads login logo when available; falls back to dark/standard SVG logos. */
+/** Loads sidebar logo for PDF header; falls back to SVG logos. */
 export async function loadExportLogo(): Promise<LogoDataUrl | null> {
-  const primary = await tryLoadLogo(LOGIN_LOGO_PATH);
+  const primary = await tryLoadLogo(EXPORT_LOGO_PATH);
   if (primary) return primary;
   for (const path of LOGO_FALLBACK_PATHS) {
     const logo = await tryLoadLogo(path);

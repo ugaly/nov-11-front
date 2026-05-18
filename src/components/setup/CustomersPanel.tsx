@@ -20,11 +20,14 @@ import type {
 import type { OfficeResponse } from "@/api/types/organization";
 import CategoriesCell from "@/components/setup/CategoriesCell";
 import DeactivateConfirmModal from "@/components/setup/DeactivateConfirmModal";
+import CustomerEmailModal from "@/components/customers/CustomerEmailModal";
 import {
   SetupRowActionDeactivate,
+  SetupRowActionEmail,
   SetupRowActionLink,
   SetupRowActions,
 } from "@/components/setup/SetupRowActions";
+import SetupEmptyState from "@/components/setup/SetupEmptyState";
 import SetupPageShell from "@/components/setup/SetupPageShell";
 import { setupFormModalClass } from "@/components/setup/setupFormModal";
 import {
@@ -148,6 +151,10 @@ function CustomerList({
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [modalOpen, setModalOpen] = useState(false);
+  const [emailTarget, setEmailTarget] = useState<{
+    id: string;
+    name: string;
+  } | null>(null);
   const [showFilters, setShowFilters] = useState(false);
   const [deactivateTarget, setDeactivateTarget] = useState<{
     id: string;
@@ -444,9 +451,14 @@ function CustomerList({
               <ListError message={error} onRetry={() => void load()} />
             </div>
           ) : items.length === 0 ? (
-            <p className="mt-6 border-t border-dashed border-gray-300 px-6 py-12 text-center text-sm text-gray-500 dark:border-gray-700">
-              No customers match your filters.
-            </p>
+            <div className="mt-6 border-t border-gray-200 pt-6 dark:border-gray-800">
+              <SetupEmptyState
+                icon={Users}
+                title="No customers match your filters."
+                description="Try adjusting search or filters, or add a new customer."
+                variant="inline"
+              />
+            </div>
           ) : (
             <div className={setupListTableSectionClass}>
               <Table className={setupTableClass}>
@@ -480,6 +492,7 @@ function CustomerList({
                     onRequestDeactivate={(id, name) =>
                       setDeactivateTarget({ id, name })
                     }
+                    onEmail={(id, name) => setEmailTarget({ id, name })}
                   />
                 ))}
               </TableBody>
@@ -519,6 +532,16 @@ function CustomerList({
           void load();
         }}
       />
+
+      {emailTarget ? (
+        <CustomerEmailModal
+          isOpen
+          companyId={companyId}
+          customerId={emailTarget.id}
+          customerName={emailTarget.name}
+          onClose={() => setEmailTarget(null)}
+        />
+      ) : null}
     </div>
   );
 }
@@ -558,11 +581,13 @@ function CustomerRow({
   companyId,
   canEdit,
   onRequestDeactivate,
+  onEmail,
 }: {
   customer: CustomerListItemResponse;
   companyId: string;
   canEdit: boolean;
   onRequestDeactivate: (id: string, name: string) => void;
+  onEmail: (id: string, name: string) => void;
 }) {
   const detailHref = `/setup/customers/${c.id}`;
 
@@ -620,6 +645,10 @@ function CustomerRow({
       <TableCell className={`${setupListTdClass} whitespace-nowrap text-right`}>
         <SetupRowActions>
           <SetupRowActionLink href={detailHref} title="View customer" />
+          <SetupRowActionEmail
+            title="Email customer"
+            onClick={() => onEmail(c.id, c.name)}
+          />
           {canEdit ? (
             <SetupRowActionDeactivate
               title="Deactivate customer"

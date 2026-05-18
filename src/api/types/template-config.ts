@@ -257,6 +257,16 @@ export interface CustomerListParams {
   country?: string;
 }
 
+export type ServiceCatalogSortField = "price";
+export type ServiceCatalogSortOrder = "asc" | "desc";
+
+export interface ServiceCatalogListParams {
+  categoryId?: string;
+  search?: string;
+  sort?: ServiceCatalogSortField;
+  order?: ServiceCatalogSortOrder;
+}
+
 export interface CustomerResponse {
   id: string;
   companyId: string;

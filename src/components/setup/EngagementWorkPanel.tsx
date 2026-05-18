@@ -6,6 +6,7 @@ import type {
 } from "@/api/types/template-config";
 import CatalogStructureModal from "@/components/setup/CatalogStructureModal";
 import FieldBuilderModal from "@/components/setup/FieldBuilderModal";
+import ShareFormLinkButton from "@/components/setup/ShareFormLinkButton";
 import TaskClosureForm from "@/components/setup/TaskClosureForm";
 import TaskClosureSummary from "@/components/setup/TaskClosureSummary";
 import TaskFieldForm from "@/components/setup/TaskFieldForm";
@@ -21,17 +22,32 @@ import {
   buildWorkItemTree,
   countWorkItems,
 } from "@/lib/work-item-tree";
+import SetupEmptyState from "@/components/setup/SetupEmptyState";
 import { ClipboardList, ListTree, Settings2, SlidersHorizontal } from "lucide-react";
 import { useMemo, useState } from "react";
 
 export default function EngagementWorkPanel({
+  companyId,
   engagement,
+  onEngagementRefresh,
 }: {
+  companyId: string;
   engagement: CustomerEngagementResponse;
+  onEngagementRefresh?: () => void | Promise<void>;
 }) {
   const [structureOpen, setStructureOpen] = useState(false);
-  const { getStatus, setStatus, mergedWorkItems, ready: statusReady } =
-    useEngagementWorkItemStatuses(engagement.id, engagement.workItems);
+  const {
+    getStatus,
+    setStatus,
+    mergedWorkItems,
+    ready: statusReady,
+    statusError,
+  } = useEngagementWorkItemStatuses(
+    companyId,
+    engagement.id,
+    engagement.workItems,
+    onEngagementRefresh
+  );
 
   const tree = useMemo(
     () => buildWorkItemTree(mergedWorkItems),
@@ -48,9 +64,11 @@ export default function EngagementWorkPanel({
 
   if (engagement.workItems.length === 0) {
     return (
-      <p className="text-sm text-gray-500">
-        No work items on this engagement yet.
-      </p>
+      <SetupEmptyState
+        icon={ClipboardList}
+        title="No work items on this engagement yet."
+        variant="bordered"
+      />
     );
   }
 
@@ -87,6 +105,10 @@ export default function EngagementWorkPanel({
         </Button>
       </div>
 
+      {statusError ? (
+        <p className="mt-2 text-xs text-error-600">{statusError}</p>
+      ) : null}
+
       <div className="mt-4 h-2.5 overflow-hidden rounded-full bg-gray-100 dark:bg-gray-800">
         <div
           className="h-full rounded-full bg-brand-500 transition-all"
@@ -110,12 +132,23 @@ export default function EngagementWorkPanel({
       <div className="mt-4">
         <WorkItemGroupTree
           sections={sections}
-          renderTask={(task, ctx) => (
+          renderGroupActions={(section) => (
+            <ShareFormLinkButton
+              companyId={companyId}
+              engagementId={engagement.id}
+              workItemId={section.key}
+              label="Share group"
+              size="sm"
+            />
+          )}
+          renderTask={(task) => (
             <TaskWorkCard
+              companyId={companyId}
               task={task}
               engagementId={engagement.id}
               status={getStatus(task)}
-              onStatusChange={(s) => setStatus(task.id, s)}
+              onStatusChange={(s) => void setStatus(task.id, s)}
+              onTaskUpdated={onEngagementRefresh}
             />
           )}
         />
@@ -159,15 +192,19 @@ function StatusChip({
 }
 
 function TaskWorkCard({
+  companyId,
   task,
   engagementId,
   status,
   onStatusChange,
+  onTaskUpdated,
 }: {
+  companyId: string;
   task: import("@/api/types/template-config").EngagementWorkItemResponse;
   engagementId: string;
   status: WorkItemStatus;
   onStatusChange: (status: WorkItemStatus) => void;
+  onTaskUpdated?: () => void | Promise<void>;
 }) {
   const [builderOpen, setBuilderOpen] = useState(false);
   const {
@@ -176,19 +213,35 @@ function TaskWorkCard({
     savedAt,
     hydrated,
     isConfigured,
+    responsesLocked,
+    formLinkUrl,
+    error: fieldError,
     persistTemplate,
     persistValues,
-  } = useWorkItemFieldState(engagementId, task.id);
+    uploadFieldFile,
+    ensureFormLink,
+    reload: reloadFields,
+    closureInitial,
+  } = useWorkItemFieldState(companyId, engagementId, task.id);
+
+  const afterMutation = async () => {
+    await reloadFields();
+    await onTaskUpdated?.();
+  };
 
   const {
     closure,
     hydrated: closureHydrated,
     showSummary,
     isClosure,
+    error: closureError,
     setRemark,
     submitClosure,
     reopenClosure,
-  } = useWorkItemClosure(engagementId, task.id, status);
+  } = useWorkItemClosure(engagementId, task.id, status, companyId, {
+    initialClosure: closureInitial,
+    onAfterSubmit: afterMutation,
+  });
 
   if (!hydrated || !closureHydrated) {
     return (
@@ -197,6 +250,20 @@ function TaskWorkCard({
       </article>
     );
   }
+
+  const fieldFormProps = {
+    fields,
+    values,
+    savedAt,
+    workItemId: task.id,
+    formLinkUrl,
+    onEnsureFormLink: async () => {
+      const link = await ensureFormLink();
+      return link?.url ?? null;
+    },
+    onUploadFieldFile: uploadFieldFile,
+    readOnly: responsesLocked,
+  };
 
   return (
     <>
@@ -214,6 +281,13 @@ function TaskWorkCard({
         </div>
 
         <div className="p-3 sm:p-4">
+          {fieldError ? (
+            <p className="mb-2 text-xs text-error-600">{fieldError}</p>
+          ) : null}
+          {closureError ? (
+            <p className="mb-2 text-xs text-error-600">{closureError}</p>
+          ) : null}
+
           {showSummary && isClosureStatus(status) ? (
             <TaskClosureSummary
               status={status as ClosureStatus}
@@ -221,7 +295,7 @@ function TaskWorkCard({
               submittedAt={closure.submittedAt!}
               fields={fields}
               values={values}
-              onReopen={reopenClosure}
+              onReopen={() => void reopenClosure()}
             />
           ) : isClosure ? (
             <TaskClosureForm
@@ -233,37 +307,41 @@ function TaskWorkCard({
               remark={closure.remark}
               isConfigured={isConfigured}
               onRemarkChange={setRemark}
-              onSaveValues={persistValues}
+              onSaveValues={(v) => void persistValues(v)}
               onSubmit={(nextValues, remark) => {
-                persistValues(nextValues);
-                submitClosure(status, remark);
+                void (async () => {
+                  await persistValues(nextValues);
+                  await submitClosure(
+                    status as ClosureStatus,
+                    remark,
+                    nextValues
+                  );
+                })();
               }}
               onEditFields={
                 isConfigured ? () => setBuilderOpen(true) : undefined
               }
+              formLinkUrl={formLinkUrl}
+              onUploadFieldFile={uploadFieldFile}
+              responsesLocked={responsesLocked}
             />
           ) : !isConfigured ? (
-            <div className="rounded-xl border border-dashed border-gray-300 bg-gray-50/80 px-4 py-8 text-center dark:border-gray-600 dark:bg-gray-900/20">
-              <SlidersHorizontal
-                className="mx-auto size-8 text-gray-300 dark:text-gray-600"
-                aria-hidden
-              />
-              <p className="mt-3 text-sm font-medium text-gray-800 dark:text-gray-200">
-                No fields configured yet
-              </p>
-              <p className="mx-auto mt-1 max-w-sm text-xs text-gray-500">
-                Choose what to capture — text, documents, dates, and notes.
-              </p>
-              <Button
-                type="button"
-                className="mt-4"
-                size="sm"
-                onClick={() => setBuilderOpen(true)}
-              >
-                <Settings2 className="mr-1.5 size-4" aria-hidden />
-                Choose fields to capture
-              </Button>
-            </div>
+            <SetupEmptyState
+              icon={SlidersHorizontal}
+              title="No fields configured yet"
+              description="Choose what to capture — text, documents, dates, and notes."
+              variant="bordered"
+              action={
+                <Button
+                  type="button"
+                  size="sm"
+                  onClick={() => setBuilderOpen(true)}
+                >
+                  <Settings2 className="mr-1.5 size-4" aria-hidden />
+                  Choose fields to capture
+                </Button>
+              }
+            />
           ) : (
             <>
               <div className="mb-3 flex flex-wrap justify-end gap-2">
@@ -278,12 +356,8 @@ function TaskWorkCard({
                 </Button>
               </div>
               <TaskFieldForm
-                fields={fields}
-                values={values}
-                savedAt={savedAt}
-                readOnly={false}
-                workItemId={task.id}
-                onSave={persistValues}
+                {...fieldFormProps}
+                onSave={(v) => void persistValues(v)}
               />
             </>
           )}
@@ -295,7 +369,10 @@ function TaskWorkCard({
         onClose={() => setBuilderOpen(false)}
         taskName={task.name}
         initialFields={fields}
-        onSave={persistTemplate}
+        onSave={async (next) => {
+          await persistTemplate(next);
+          await afterMutation();
+        }}
       />
     </>
   );

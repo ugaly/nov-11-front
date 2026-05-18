@@ -12,7 +12,13 @@ import {
   formatFileSize,
 } from "@/lib/work-item-file-utils";
 import {
+  attachmentEmbedSrc,
+  attachmentOpenUrl,
+  attachmentPreviewSrc,
+} from "@/lib/work-item-api-files";
+import {
   Download,
+  ExternalLink,
   FileSpreadsheet,
   FileText,
   FileType2,
@@ -51,17 +57,32 @@ export default function FilePreviewModal({
 }) {
   if (!file) return null;
 
-  const hasData = Boolean(file.dataUrl);
-  const previewable = canPreviewAttachment(file);
-  const isVisualPreview =
-    hasData && (file.kind === "image" || file.kind === "pdf");
+  const src = attachmentPreviewSrc(file);
+  const embedSrc = attachmentEmbedSrc(file);
+  const openUrl = attachmentOpenUrl(file);
+  const hasData = Boolean(src);
+  const previewable = canPreviewAttachment(file) || Boolean(file.url);
+  const isImage =
+    hasData &&
+    (file.kind === "image" || file.mimeType.startsWith("image/"));
+  const isPdf =
+    hasData &&
+    (file.kind === "pdf" || file.mimeType === "application/pdf");
+  const isVisualPreview = isImage || isPdf;
 
   function download() {
-    if (!file?.dataUrl) return;
+    if (!openUrl || !file) return;
     const a = document.createElement("a");
-    a.href = file.dataUrl;
+    a.href = openUrl;
     a.download = file.name;
+    a.target = "_blank";
+    a.rel = "noopener noreferrer";
     a.click();
+  }
+
+  function openInNewTab() {
+    if (!openUrl) return;
+    window.open(openUrl, "_blank", "noopener,noreferrer");
   }
 
   return (
@@ -101,20 +122,28 @@ export default function FilePreviewModal({
               : undefined
           }
         >
-          {file.kind === "image" && hasData ? (
+          {isImage ? (
             // eslint-disable-next-line @next/next/no-img-element
             <img
-              src={file.dataUrl}
+              src={src}
               alt={file.name}
               className="max-h-[min(88vh,60rem)] w-full object-contain"
+              referrerPolicy="no-referrer"
             />
-          ) : file.kind === "pdf" && hasData ? (
-            <iframe
-              title={file.name}
-              src={file.dataUrl}
+          ) : isPdf ? (
+            <object
+              data={embedSrc}
+              type="application/pdf"
               className="size-full min-h-[min(70vh,40rem)] bg-white"
               style={{ height: "min(88vh, 60rem)" }}
-            />
+            >
+              <iframe
+                title={file.name}
+                src={embedSrc}
+                className="size-full min-h-[min(70vh,40rem)] bg-white"
+                style={{ height: "min(88vh, 60rem)" }}
+              />
+            </object>
           ) : (
             <div className="flex flex-col items-center gap-4 px-6 py-10 text-center">
               <div className="flex size-28 items-center justify-center rounded-2xl bg-white shadow-sm ring-1 ring-gray-200 dark:bg-gray-800 dark:ring-gray-700">
@@ -150,7 +179,25 @@ export default function FilePreviewModal({
           )}
         </div>
 
-        {hasData && file.kind !== "image" && file.kind !== "pdf" ? (
+        {hasData && isPdf ? (
+          <div className="mt-4 flex shrink-0 justify-end gap-2">
+            <Button
+              type="button"
+              variant="outline"
+              size="sm"
+              onClick={openInNewTab}
+            >
+              <ExternalLink className="mr-1.5 size-4" aria-hidden />
+              Open in new tab
+            </Button>
+            <Button type="button" variant="outline" size="sm" onClick={download}>
+              <Download className="mr-1.5 size-4" aria-hidden />
+              Download
+            </Button>
+          </div>
+        ) : null}
+
+        {hasData && !isImage && !isPdf ? (
           <div className="mt-4 flex shrink-0 justify-end">
             <Button type="button" variant="outline" size="sm" onClick={download}>
               <Download className="mr-1.5 size-4" aria-hidden />

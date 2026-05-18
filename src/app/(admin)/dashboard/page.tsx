@@ -1,12 +1,12 @@
 import type { Metadata } from "next";
-import TodayDashboard from "@/components/today/TodayDashboard";
+import OperationsDashboard from "@/components/dashboard/OperationsDashboard";
 
 export const metadata: Metadata = {
-  title: "Today | Branch operations",
+  title: "Dashboard",
   description:
-    "Real-time logistics snapshot for your branch: receipts, shipments, and SLA.",
+    "Company overview: customers, engagements, and service category performance.",
 };
 
-export default function TodayPage() {
-  return <TodayDashboard />;
+export default function DashboardPage() {
+  return <OperationsDashboard />;
 }

@@ -6,10 +6,12 @@ import {
   catalogNodeLeafCount,
   catalogTableColumnLabel,
 } from "@/lib/catalog-node-table";
+import SetupEmptyState from "@/components/setup/SetupEmptyState";
 import {
   formatPriceOnly,
   getDurationDisplay,
 } from "@/lib/template-pricing";
+import { ListTree } from "lucide-react";
 
 const thClass =
   "border border-gray-300 bg-gray-50 px-4 py-3 text-left text-xs font-semibold uppercase tracking-wide text-gray-600 dark:border-gray-600 dark:bg-gray-900/70 dark:text-gray-400";
@@ -25,7 +27,13 @@ export default function CatalogNodeTableView({
   const { maxDepth, rows } = buildCatalogTableRows(nodes);
 
   if (rows.length === 0) {
-    return <p className="text-sm text-gray-500">No template nodes yet.</p>;
+    return (
+      <SetupEmptyState
+        icon={ListTree}
+        title="No template nodes yet."
+        variant="bordered"
+      />
+    );
   }
 
   return (

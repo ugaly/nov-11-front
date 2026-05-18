@@ -11,7 +11,7 @@ import Input from "@/components/form/input/InputField";
 import Label from "@/components/form/Label";
 import { Modal } from "@/components/ui/modal";
 import { BUILDER_WIDGET_OPTIONS } from "@/lib/field-widget-meta";
-import { newFieldId } from "@/lib/work-item-field-store";
+import { findDuplicateFieldIds, newFieldId } from "@/lib/work-item-field-store";
 import { GripVertical, Plus, Trash2, X } from "lucide-react";
 import { useEffect, useState } from "react";
 
@@ -97,12 +97,13 @@ export default function FieldBuilderModal({
   onClose: () => void;
   taskName: string;
   initialFields: WorkItemFieldDefinition[];
-  onSave: (fields: WorkItemFieldDefinition[]) => void;
+  onSave: (fields: WorkItemFieldDefinition[]) => void | Promise<void>;
 }) {
   const [drafts, setDrafts] = useState<DraftField[]>([]);
   const [adding, setAdding] = useState(false);
   const [newField, setNewField] = useState<DraftField>(emptyDraft);
   const [error, setError] = useState<string | null>(null);
+  const [saving, setSaving] = useState(false);
 
   useEffect(() => {
     if (open) {
@@ -119,7 +120,7 @@ export default function FieldBuilderModal({
       setError("Enter a field label (e.g. TIN number).");
       return;
     }
-    setDrafts((d) => [...d, { ...newField, label }]);
+    setDrafts((d) => [...d, { ...newField, id: newFieldId(), label }]);
     setNewField(emptyDraft());
     setAdding(false);
     setError(null);
@@ -129,14 +130,31 @@ export default function FieldBuilderModal({
     setDrafts((d) => d.filter((f) => f.id !== id));
   }
 
-  function handleSave() {
+  async function handleSave() {
     const valid = drafts.filter((d) => d.label.trim());
     if (!valid.length) {
       setError("Add at least one field before saving.");
       return;
     }
-    onSave(valid.map((d, i) => fromDraft(d, i)));
-    onClose();
+    const payload = valid.map((d, i) => fromDraft(d, i));
+    const dupes = findDuplicateFieldIds(payload);
+    if (dupes.length) {
+      setError("Two fields share the same id. Remove one and add it again.");
+      if (process.env.NODE_ENV !== "production") {
+        console.warn("[work-item] duplicate field ids in builder", dupes);
+      }
+      return;
+    }
+    setSaving(true);
+    setError(null);
+    try {
+      await onSave(payload);
+      onClose();
+    } catch {
+      setError("Could not save fields. Try again or refresh the page.");
+    } finally {
+      setSaving(false);
+    }
   }
 
   return (
@@ -340,8 +358,13 @@ export default function FieldBuilderModal({
         <Button type="button" variant="outline" size="sm" onClick={onClose}>
           Cancel
         </Button>
-        <Button type="button" size="sm" onClick={handleSave}>
-          Save field setup
+        <Button
+          type="button"
+          size="sm"
+          disabled={saving}
+          onClick={() => void handleSave()}
+        >
+          {saving ? "Saving…" : "Save field setup"}
         </Button>
       </div>
     </Modal>

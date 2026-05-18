@@ -1,6 +1,5 @@
 /**
- * Frontend contract for per-task template fields (backend TBD).
- * Drives component-based rendering: inputs, files, tables, customer links.
+ * Per-task field template & values (aligned with backend WorkItemFieldDefinitionDto).
  */
 export type WorkItemFieldWidgetType =
   | "TEXT"
@@ -55,20 +54,23 @@ export type WorkItemFileKind =
   | "document"
   | "other";
 
-/** Local file metadata + data URL for preview until upload API exists. */
 export interface WorkItemFileAttachment {
   id: string;
   name: string;
   mimeType: string;
   size: number;
   kind: WorkItemFileKind;
-  /** Base64 data URL for preview / download in-session and localStorage. */
-  dataUrl: string;
+  /** Served file URL from backend upload. */
+  url?: string;
+  /** Legacy / local preview before upload. */
+  dataUrl?: string;
 }
 
 export interface WorkItemFieldValue {
   fieldId: string;
   value?: string | number | boolean | null;
+  /** TABLE widget rows from API. */
+  tableRows?: Record<string, string | number | boolean | null>[];
   /** @deprecated Use `attachments` — kept for older saved values. */
   fileNames?: string[];
   attachments?: WorkItemFileAttachment[];

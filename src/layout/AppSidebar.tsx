@@ -7,7 +7,9 @@ import {
   BoxCubeIcon,
   CalenderIcon,
   ChevronDownIcon,
+  DollarLineIcon,
   GridIcon,
+  GroupIcon,
   HorizontaLDots,
   ListIcon,
   PageIcon,
@@ -17,8 +19,7 @@ import {
   UserCircleIcon,
 } from "../icons/index";
 
-/** Same asset as `LogisticsLoginPage` */
-const APP_LOGO_SRC = "/images/logo/logo.png";
+import { APP_LOGO_SRC } from "@/lib/brand-logo";
 
 type NavItem = {
   name: string;
@@ -31,10 +32,17 @@ const navItems: NavItem[] = [
   {
     icon: <GridIcon />,
     name: "Dashboard",
-    subItems: [
-      { name: "Today", path: "/dashboard", pro: false },
-      { name: "Ecommerce", path: "/dashboard/ecommerce", pro: false },
-    ],
+    path: "/dashboard",
+  },
+  {
+    icon: <GroupIcon />,
+    name: "Customers",
+    path: "/setup/customers",
+  },
+  {
+    icon: <DollarLineIcon />,
+    name: "Invoices",
+    path: "/invoices",
   },
   // {
   //   icon: <CalenderIcon />,
@@ -74,7 +82,6 @@ const othersItems: NavItem[] = [
     subItems: [
       { name: "Service categories", path: "/setup/service-categories" },
       { name: "All catalogs", path: "/setup/service-catalogs" },
-      { name: "Customers", path: "/setup/customers" },
       { name: "Engagements", path: "/setup/engagements" },
     ],
   },

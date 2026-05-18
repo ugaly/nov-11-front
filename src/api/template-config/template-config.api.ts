@@ -14,6 +14,7 @@ import type {
   PatchCustomerRequest,
   PatchServiceCatalogRequest,
   PatchServiceCategoryRequest,
+  ServiceCatalogListParams,
   ServiceCatalogNodeResponse,
   ServiceCatalogResponse,
   ServiceCategoryResponse,
@@ -97,23 +98,37 @@ export async function deleteServiceCategory(
 
 // —— Service catalogs ——
 
+function buildServiceCatalogListQuery(
+  params?: ServiceCatalogListParams
+): Record<string, string> | undefined {
+  if (!params) return undefined;
+  const query: Record<string, string> = {};
+  if (params.categoryId) query.categoryId = params.categoryId;
+  if (params.search?.trim()) query.search = params.search.trim();
+  if (params.sort) {
+    query.sort = params.sort;
+    query.order = params.order ?? "asc";
+  }
+  return Object.keys(query).length > 0 ? query : undefined;
+}
+
 export async function listServiceCatalogs(
-  companyId: string
+  companyId: string,
+  params?: ServiceCatalogListParams
 ): Promise<ServiceCatalogResponse[]> {
   const { data } = await apiClient.get<ServiceCatalogResponse[]>(
-    `${companyPath(companyId)}/service-catalogs`
+    `${companyPath(companyId)}/service-catalogs`,
+    { params: buildServiceCatalogListQuery(params) }
   );
   return data;
 }
 
 export async function listServiceCatalogsByCategory(
   companyId: string,
-  categoryId: string
+  categoryId: string,
+  params?: Omit<ServiceCatalogListParams, "categoryId">
 ): Promise<ServiceCatalogResponse[]> {
-  const { data } = await apiClient.get<ServiceCatalogResponse[]>(
-    `${companyPath(companyId)}/service-categories/${categoryId}/service-catalogs`
-  );
-  return data;
+  return listServiceCatalogs(companyId, { ...params, categoryId });
 }
 
 export async function getServiceCatalog(

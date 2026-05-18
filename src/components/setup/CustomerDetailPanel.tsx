@@ -11,8 +11,10 @@ import type {
   CustomerResponse,
   EngagementStatus,
 } from "@/api/types/template-config";
+import CustomerDetailActions from "@/components/customers/CustomerDetailActions";
 import EngagementDetailBody from "@/components/setup/EngagementDetailBody";
 import EngagementFormModal from "@/components/setup/EngagementFormModal";
+import SetupEmptyState from "@/components/setup/SetupEmptyState";
 import {
   ActiveBadge,
   SetupAvatar,
@@ -237,6 +239,18 @@ export default function CustomerDetailPanel({
             </div>
           </div>
 
+          {engagements.length > 0 ? (
+            <section className="rounded-2xl border border-gray-200 bg-white p-5 shadow-sm dark:border-gray-800 dark:bg-white/[0.02] lg:px-6">
+              <CustomerDetailActions
+                companyId={companyId}
+                customerId={customerId}
+                customerName={customer.name}
+                customerEmail={customer.contactEmail}
+                engagements={engagements}
+              />
+            </section>
+          ) : null}
+
           {/* Engagements — tabs only, no section title */}
           <section
             className="overflow-hidden rounded-2xl border border-gray-200 bg-white shadow-sm dark:border-gray-800 dark:bg-white/[0.02]"
@@ -291,28 +305,21 @@ export default function CustomerDetailPanel({
 
                 <div className="min-h-[10rem] p-4 lg:p-5" role="tabpanel">
                   {engagements.length === 0 ? (
-                    <div className="py-8 text-center">
-                      <FileText
-                        className="mx-auto size-10 text-gray-300 dark:text-gray-600"
-                        aria-hidden
-                      />
-                      <p className="mt-4 text-sm font-medium text-gray-800 dark:text-gray-200">
-                        No engagements yet
-                      </p>
-                      <p className="mx-auto mt-2 max-w-sm text-sm text-gray-500">
-                        Add an engagement to link a service catalog to this
-                        customer.
-                      </p>
-                      <Button
-                        type="button"
-                        className="mt-6"
-                        size="sm"
-                        onClick={() => setEngagementModalOpen(true)}
-                      >
-                        <Plus className="mr-1.5 size-4" aria-hidden />
-                        Add engagement
-                      </Button>
-                    </div>
+                    <SetupEmptyState
+                      icon={FileText}
+                      title="No engagements yet"
+                      description="Add an engagement to link a service catalog to this customer."
+                      action={
+                        <Button
+                          type="button"
+                          size="sm"
+                          onClick={() => setEngagementModalOpen(true)}
+                        >
+                          <Plus className="mr-1.5 size-4" aria-hidden />
+                          Add engagement
+                        </Button>
+                      }
+                    />
                   ) : detailLoading ? (
                     <p className="flex items-center gap-2 text-sm text-gray-500">
                       <Loader2 className="size-4 animate-spin" aria-hidden />
@@ -339,8 +346,14 @@ export default function CustomerDetailPanel({
                     </div>
                   ) : activeDetail ? (
                     <EngagementDetailBody
+                      companyId={companyId}
                       engagement={activeDetail}
                       showOpenLink
+                      onEngagementRefresh={async () => {
+                        if (!selectedId) return;
+                        detailCache.current.delete(selectedId);
+                        setDetailRetry((n) => n + 1);
+                      }}
                     />
                   ) : null}
                 </div>

@@ -77,11 +77,28 @@ export async function fileToAttachment(
   };
 }
 
+/** Ensure `kind` + `url` from GET field-values display correctly (API omits `kind`). */
+export function normalizeAttachmentFromApi(
+  a: Omit<WorkItemFileAttachment, "kind"> & { kind?: WorkItemFileKind }
+): WorkItemFileAttachment {
+  return {
+    id: a.id,
+    name: a.name,
+    mimeType: a.mimeType,
+    size: a.size,
+    kind: a.kind ?? kindFromMimeAndName(a.mimeType, a.name),
+    url: a.url,
+    dataUrl: a.dataUrl ?? "",
+  };
+}
+
 /** Normalize legacy `fileNames`-only values into attachment records. */
 export function getAttachments(
   value?: WorkItemFieldValue
 ): WorkItemFileAttachment[] {
-  if (value?.attachments?.length) return value.attachments;
+  if (value?.attachments?.length) {
+    return value.attachments.map(normalizeAttachmentFromApi);
+  }
   return (value?.fileNames ?? []).map((name) => ({
     id: `legacy_${name}`,
     name,
@@ -102,8 +119,8 @@ export function attachmentsToFieldPatch(
 }
 
 export function canPreviewAttachment(att: WorkItemFileAttachment): boolean {
-  if (!att.dataUrl) return false;
-  return (
-    att.kind === "image" || att.kind === "pdf" || att.kind === "spreadsheet"
-  );
+  const src = att.url ?? att.dataUrl;
+  if (!src) return false;
+  const kind = att.kind ?? kindFromMimeAndName(att.mimeType, att.name);
+  return kind === "image" || kind === "pdf" || kind === "spreadsheet";
 }

@@ -1,5 +1,7 @@
-/** Same asset as the login page header. */
-export const LOGIN_LOGO_PATH = "/images/logo/Logo-White.jpg";
+import { APP_LOGO_SRC } from "@/lib/brand-logo";
+
+/** Same asset as the app sidebar (`AppSidebar`). */
+export const EXPORT_LOGO_PATH = APP_LOGO_SRC;
 
 export const LOGO_FALLBACK_PATHS = [
   "/images/logo/logo-dark.svg",

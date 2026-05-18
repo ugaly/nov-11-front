@@ -7,12 +7,15 @@ import { useMemo, useState, type ReactNode } from "react";
 export default function WorkItemGroupTree({
   sections,
   renderTask,
+  renderGroupActions,
 }: {
   sections: WorkGroupSection[];
   renderTask: (
     task: WorkGroupSection["tasks"][number]["task"],
     ctx: { taskRoman: string; groupNumber: number; groupTitle: string | null }
   ) => ReactNode;
+  /** Shown on group header (e.g. share GROUP form link). */
+  renderGroupActions?: (section: WorkGroupSection) => ReactNode;
 }) {
   const groupKeys = useMemo(
     () =>
@@ -102,6 +105,15 @@ export default function WorkItemGroupTree({
                   <span className="shrink-0 rounded-full bg-gray-100 px-2 py-0.5 text-[10px] font-medium tabular-nums text-gray-600 dark:bg-gray-800 dark:text-gray-400">
                     {doneCount}/{section.tasks.length} done
                   </span>
+                  {renderGroupActions && section.groupNumber > 0 ? (
+                    <span
+                      className="shrink-0"
+                      onClick={(e) => e.stopPropagation()}
+                      onKeyDown={(e) => e.stopPropagation()}
+                    >
+                      {renderGroupActions(section)}
+                    </span>
+                  ) : null}
                 </button>
               ) : null}
 
