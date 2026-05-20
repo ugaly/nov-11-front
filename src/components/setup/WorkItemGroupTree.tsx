@@ -2,42 +2,34 @@
 
 import type { WorkGroupSection } from "@/lib/work-item-tree";
 import { ChevronDown, ChevronRight } from "lucide-react";
-import { useMemo, useState, type ReactNode } from "react";
+import type { ReactNode } from "react";
 
 export default function WorkItemGroupTree({
   sections,
+  expandedGroups,
+  onToggleGroup,
   renderTask,
   renderGroupActions,
 }: {
   sections: WorkGroupSection[];
+  /** Controlled expand state (key = group work item id). */
+  expandedGroups: Record<string, boolean>;
+  onToggleGroup: (groupKey: string) => void;
   renderTask: (
     task: WorkGroupSection["tasks"][number]["task"],
-    ctx: { taskRoman: string; groupNumber: number; groupTitle: string | null }
+    ctx: {
+      taskRoman: string;
+      groupNumber: number;
+      groupTitle: string | null;
+      groupKey: string | null;
+    }
   ) => ReactNode;
   /** Shown on group header (e.g. share GROUP form link). */
   renderGroupActions?: (section: WorkGroupSection) => ReactNode;
 }) {
-  const groupKeys = useMemo(
-    () =>
-      sections
-        .filter((s) => s.groupNumber > 0)
-        .map((s) => s.key),
-    [sections]
-  );
-
-  const [expanded, setExpanded] = useState<Record<string, boolean>>(() => {
-    const init: Record<string, boolean> = {};
-    for (const key of groupKeys) init[key] = false;
-    return init;
-  });
-
-  function toggle(key: string) {
-    setExpanded((prev) => ({ ...prev, [key]: !prev[key] }));
-  }
-
   function isExpanded(section: WorkGroupSection) {
     if (section.groupNumber === 0) return true;
-    return expanded[section.key] !== false;
+    return expandedGroups[section.key] === true;
   }
 
   return (
@@ -84,7 +76,7 @@ export default function WorkItemGroupTree({
               {!isStandalone ? (
                 <button
                   type="button"
-                  onClick={() => toggle(section.key)}
+                  onClick={() => onToggleGroup(section.key)}
                   aria-expanded={open}
                   className="group flex w-full items-center gap-2 rounded-lg border border-transparent px-1 py-1.5 text-left transition-colors hover:border-gray-200 hover:bg-gray-50 dark:hover:border-gray-700 dark:hover:bg-gray-800/50"
                 >
@@ -154,6 +146,8 @@ export default function WorkItemGroupTree({
                             taskRoman,
                             groupNumber: section.groupNumber,
                             groupTitle: section.title,
+                            groupKey:
+                              section.groupNumber > 0 ? section.key : null,
                           })}
                         </div>
                       </li>

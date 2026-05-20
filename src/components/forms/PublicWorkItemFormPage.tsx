@@ -21,17 +21,24 @@ import {
   findInvalidAttachmentIds,
   prepareFieldValuesForApi,
 } from "@/lib/work-item-field-store";
+import {
+  publicFormCanSubmit,
+  publicStepCanSubmit,
+} from "@/lib/work-item-submission-controls";
 import { CheckCircle2, Loader2 } from "lucide-react";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 
-function prepareValuesForSubmit(raw: WorkItemFieldValue[]): WorkItemFieldValue[] {
+function prepareValuesForSubmit(
+  raw: WorkItemFieldValue[],
+  fields: WorkItemFieldDefinition[]
+): WorkItemFieldValue[] {
   const invalid = findInvalidAttachmentIds(raw);
   if (invalid.length) {
     throw new Error(
       "Some files were not uploaded. Remove them and add files again."
     );
   }
-  return prepareFieldValuesForApi(raw);
+  return prepareFieldValuesForApi(raw, fields);
 }
 
 export default function PublicWorkItemFormPage({
@@ -54,11 +61,19 @@ export default function PublicWorkItemFormPage({
       setData(res);
       if (res.linkScope === "GROUP" && res.steps?.length) {
         const firstOpen = res.steps.findIndex(
-          (s) => s.configured && !s.edited && !s.readOnly
+          (s) => s.configured && publicStepCanSubmit(s)
         );
         setActiveStep(firstOpen >= 0 ? firstOpen : 0);
+        setCompleted(
+          res.readOnly ||
+            res.steps.every((s) => !s.configured || !publicStepCanSubmit(s))
+        );
+      } else {
+        setCompleted(
+          res.readOnly ||
+            !publicFormCanSubmit(res.readOnly, res.edited, res.publicSubmitEnabled)
+        );
       }
-      setCompleted(res.readOnly || res.edited);
     } catch (err) {
       const code = getApiErrorCode(err);
       if (code === "PUBLIC_TOKEN_NOT_FOUND") {
@@ -130,7 +145,13 @@ export default function PublicWorkItemFormPage({
     );
   }
 
-  if (completed || data.readOnly) {
+  const taskCanSubmit = publicFormCanSubmit(
+    data.readOnly,
+    data.edited,
+    data.publicSubmitEnabled
+  );
+
+  if (completed || data.readOnly || !taskCanSubmit) {
     return (
       <div className="mx-auto max-w-lg px-4 py-16 text-center">
         <CheckCircle2
@@ -227,6 +248,11 @@ function PublicTaskForm({
   ) => Promise<WorkItemFileAttachment>;
   onSubmitted: () => void;
 }) {
+  const canSubmit = publicFormCanSubmit(
+    data.readOnly,
+    data.edited,
+    data.publicSubmitEnabled
+  );
   const fields = data.fields ?? [];
   const values = useMemo(
     () => applyCustomerPrefill(fields, data.values ?? []),
@@ -242,7 +268,7 @@ function PublicTaskForm({
         fields={fields}
         values={values}
         savedAt={null}
-        readOnly={data.readOnly}
+        readOnly={data.readOnly || !canSubmit}
         workItemId={data.workItemId ?? ""}
         hideActions
         registerGetValues={(fn) => {
@@ -253,15 +279,19 @@ function PublicTaskForm({
           uploadPublicFile(fieldId, file, data.workItemId)
         }
       />
-      <div className="mt-6 flex flex-wrap gap-2 border-t border-gray-200 pt-4 dark:border-gray-700">
-        <Button
-          type="button"
-          size="sm"
-          variant="outline"
-          disabled={submitting}
-          onClick={() =>
-            void putPublicWorkItemFormDraft(publicToken, {
-              values: prepareValuesForSubmit(getValuesRef.current()),
+      {canSubmit ? (
+        <div className="mt-6 flex flex-wrap gap-2 border-t border-gray-200 pt-4 dark:border-gray-700">
+          <Button
+            type="button"
+            size="sm"
+            variant="outline"
+            disabled={submitting}
+            onClick={() =>
+              void putPublicWorkItemFormDraft(publicToken, {
+                values: prepareValuesForSubmit(
+                  getValuesRef.current(),
+                  fields
+                ),
             })
           }
         >
@@ -270,29 +300,39 @@ function PublicTaskForm({
         <Button
           type="button"
           size="sm"
-          disabled={submitting || data.readOnly}
+          disabled={submitting}
           onClick={() => {
             void (async () => {
               setSubmitting(true);
               setSubmitError(null);
               try {
                 await postPublicWorkItemFormSubmit(publicToken, {
-                  values: prepareValuesForSubmit(getValuesRef.current()),
-                });
-                onSubmitted();
-              } catch (err) {
-                setSubmitError(
-                  getApiErrorMessage(err, "Could not submit form.")
-                );
-              } finally {
-                setSubmitting(false);
-              }
-            })();
-          }}
-        >
-          {submitting ? "Submitting…" : "Submit"}
-        </Button>
-      </div>
+                  values: prepareValuesForSubmit(
+                    getValuesRef.current(),
+                    fields
+                  ),
+                  });
+                  onSubmitted();
+                } catch (err) {
+                  const code = getApiErrorCode(err);
+                  setSubmitError(
+                    getApiErrorMessage(
+                      err,
+                      code === "FORM_ALREADY_SUBMITTED"
+                        ? "This form has already been submitted."
+                        : "Could not submit form."
+                    )
+                  );
+                } finally {
+                  setSubmitting(false);
+                }
+              })();
+            }}
+          >
+            {submitting ? "Submitting…" : "Submit"}
+          </Button>
+        </div>
+      ) : null}
       {submitError ? (
         <p className="mt-2 text-xs text-error-600">{submitError}</p>
       ) : null}
@@ -361,6 +401,8 @@ function PublicGroupStepper({
     );
   }
 
+  const stepCanSubmit = publicStepCanSubmit(step);
+
   return (
     <PublicShell data={data}>
       <nav
@@ -368,7 +410,7 @@ function PublicGroupStepper({
         aria-label="Form steps"
       >
         {stepTabs.map((s) => {
-          const done = s.edited;
+          const done = s.configured && !publicStepCanSubmit(s);
           const active = s.index === activeStep;
           const disabled = !s.configured;
           return (
@@ -404,7 +446,7 @@ function PublicGroupStepper({
         <p className="text-sm text-gray-500">
           This step is not available yet ({step.skipReason ?? "not configured"}).
         </p>
-      ) : step.readOnly ? (
+      ) : !stepCanSubmit ? (
         <p className="text-sm text-emerald-600">
           You have already submitted this step.
         </p>
@@ -414,7 +456,7 @@ function PublicGroupStepper({
             fields={step.fields}
             values={values}
             savedAt={null}
-            readOnly={step.readOnly}
+            readOnly={!stepCanSubmit}
             workItemId={step.workItemId}
             hideActions
             registerGetValues={(fn) => {
@@ -444,7 +486,10 @@ function PublicGroupStepper({
               onClick={() =>
                 void putPublicWorkItemFormDraft(publicToken, {
                   taskWorkItemId: step.workItemId,
-                  values: prepareValuesForSubmit(getValuesRef.current()),
+                  values: prepareValuesForSubmit(
+                    getValuesRef.current(),
+                    step.fields
+                  ),
                 })
               }
             >
@@ -464,7 +509,8 @@ function PublicGroupStepper({
                       step.workItemId,
                       {
                         values: prepareValuesForSubmit(
-                          getValuesRef.current()
+                          getValuesRef.current(),
+                          step.fields
                         ),
                       }
                     );
@@ -478,8 +524,14 @@ function PublicGroupStepper({
                       setActiveStep(res.nextStepIndex);
                     }
                   } catch (err) {
+                    const code = getApiErrorCode(err);
                     setSubmitError(
-                      getApiErrorMessage(err, "Could not submit step.")
+                      getApiErrorMessage(
+                        err,
+                        code === "FORM_ALREADY_SUBMITTED"
+                          ? "This step has already been submitted."
+                          : "Could not submit step."
+                      )
                     );
                   } finally {
                     setSubmitting(false);

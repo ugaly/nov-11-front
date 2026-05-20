@@ -111,6 +111,94 @@ export async function createBrandedPdf(
   return { doc, startY: y };
 }
 
+export type ExportCoverCardMeta = {
+  companyName: string;
+  /** e.g. customer · engagement · task */
+  subtitle: string;
+  generatedAt?: Date;
+};
+
+/** Cover card without report title or services tagline (task section exports). */
+export async function createExportCoverCardPdf(
+  meta: ExportCoverCardMeta
+): Promise<{ doc: jsPDF; startY: number }> {
+  const doc = new jsPDF({ orientation: "portrait", unit: "mm", format: "a4" });
+  const pageWidth = doc.internal.pageSize.getWidth();
+  const margin = 14;
+  const cardX = margin;
+  const cardW = pageWidth - margin * 2;
+  const [hr, hg, hb] = PDF_HEADER_RGB;
+
+  doc.setFillColor(hr, hg, hb);
+  doc.rect(0, 0, pageWidth, 22, "F");
+
+  const logo = await getLogo();
+  if (logo) {
+    const logoWidth = 40;
+    const logoHeight = 12;
+    doc.addImage(
+      logo.dataUrl,
+      logo.format,
+      (pageWidth - logoWidth) / 2,
+      5,
+      logoWidth,
+      logoHeight,
+      undefined,
+      "FAST"
+    );
+  }
+
+  let cardY = 30;
+  const padX = 6;
+  const padY = 5;
+  const lineH = 6;
+
+  doc.setFont("helvetica", "bold");
+  doc.setFontSize(14);
+  const companyLines = doc.splitTextToSize(meta.companyName, cardW - padX * 2);
+  const subtitleLines = doc.splitTextToSize(meta.subtitle, cardW - padX * 2);
+
+  doc.setFont("helvetica", "normal");
+  doc.setFontSize(10);
+  const generatedAt = meta.generatedAt ?? new Date();
+  const generatedLine = `Generated ${formatGeneratedAt(generatedAt)}`;
+
+  const cardH =
+    padY * 2 +
+    companyLines.length * lineH +
+    4 +
+    subtitleLines.length * 5 +
+    4 +
+    5;
+
+  doc.setFillColor(249, 250, 251);
+  doc.setDrawColor(229, 231, 235);
+  doc.setLineWidth(0.3);
+  doc.roundedRect(cardX, cardY, cardW, cardH, 3, 3, "FD");
+
+  doc.setFillColor(hr, hg, hb);
+  doc.rect(cardX, cardY, cardW, 1.2, "F");
+
+  let y = cardY + padY + 2;
+  doc.setFont("helvetica", "bold");
+  doc.setFontSize(14);
+  doc.setTextColor(...PDF_TEXT_RGB);
+  doc.text(companyLines, pageWidth / 2, y, { align: "center" });
+  y += companyLines.length * lineH + 3;
+
+  doc.setFont("helvetica", "normal");
+  doc.setFontSize(10);
+  doc.setTextColor(...PDF_MUTED_RGB);
+  doc.text(subtitleLines, pageWidth / 2, y, { align: "center" });
+  y += subtitleLines.length * 5 + 3;
+
+  doc.setFontSize(9);
+  doc.setTextColor(156, 163, 175);
+  doc.text(generatedLine, pageWidth / 2, y, { align: "center" });
+
+  return { doc, startY: cardY + cardH + 12 };
+}
+
 const tableTheme = {
   headStyles: {
     fillColor: PDF_TABLE_HEAD_RGB,
@@ -128,12 +216,20 @@ const tableTheme = {
   margin: { left: 14, right: 14 },
 };
 
+export type PdfTableCell =
+  | string
+  | {
+      content: string;
+      rowSpan?: number;
+      colSpan?: number;
+    };
+
 export function addPdfTable(
   doc: jsPDF,
   startY: number,
   options: {
     head: string[][];
-    body: string[][];
+    body: PdfTableCell[][];
     title?: string;
   }
 ): number {

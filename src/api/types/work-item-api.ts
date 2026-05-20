@@ -21,8 +21,22 @@ export interface WorkItemFormLinkSummaryDto {
   publicToken: string;
   linkScope: WorkItemLinkScope;
   edited: boolean;
+  /** When false, customer cannot submit or save draft (synced with `edited` after submit). */
+  publicSubmitEnabled?: boolean;
   enabled: boolean;
   expiresAt: string | null;
+}
+
+export interface WorkItemSubmissionControlsResponse {
+  workItemId: string;
+  internalEditEnabled: boolean;
+  publicSubmitEnabled: boolean;
+  responsesLocked: boolean;
+}
+
+export interface PatchWorkItemSubmissionControlsRequest {
+  publicSubmitEnabled?: boolean;
+  internalEditEnabled?: boolean;
 }
 
 export interface WorkItemFormLinkResponse extends WorkItemFormLinkSummaryDto {
@@ -46,6 +60,8 @@ export interface WorkItemFieldValuesResponse {
   workItemId: string;
   savedAt: string | null;
   responsesLocked: boolean;
+  internalEditEnabled?: boolean;
+  publicSubmitEnabled?: boolean;
   values: WorkItemFieldValue[];
 }
 
@@ -68,6 +84,8 @@ export interface WorkItemExecutionBundleResponse {
   formLink: WorkItemFormLinkSummaryDto | null;
   closure: WorkItemClosureResponse;
   responsesLocked: boolean;
+  internalEditEnabled?: boolean;
+  publicSubmitEnabled?: boolean;
 }
 
 export interface SaveFieldValuesRequest {
@@ -87,8 +105,13 @@ export interface CreateFormLinkRequest {
 export interface PatchFormLinkRequest {
   enabled?: boolean;
   edited?: boolean;
+  publicSubmitEnabled?: boolean;
   expiresAt?: string | null;
-  steps?: { taskWorkItemId: string; edited: boolean }[];
+  steps?: {
+    taskWorkItemId: string;
+    edited?: boolean;
+    publicSubmitEnabled?: boolean;
+  }[];
 }
 
 export interface SubmitClosureRequest {
@@ -109,6 +132,7 @@ export interface PublicFormStepDto {
   taskDescription?: string | null;
   configured: boolean;
   edited: boolean;
+  publicSubmitEnabled?: boolean;
   readOnly: boolean;
   fields: WorkItemFieldDefinition[];
   values: WorkItemFieldValue[];
@@ -122,6 +146,7 @@ export interface PublicWorkItemFormResponse {
   customerName: string;
   anchorName: string;
   edited: boolean;
+  publicSubmitEnabled?: boolean;
   enabled: boolean;
   readOnly: boolean;
   workItemId?: string;

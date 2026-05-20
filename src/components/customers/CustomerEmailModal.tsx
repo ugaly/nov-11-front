@@ -8,6 +8,7 @@ import Input from "@/components/form/input/InputField";
 import Label from "@/components/form/Label";
 import { Modal } from "@/components/ui/modal";
 import { useCompanyContext } from "@/hooks/useCompanyContext";
+import { sendMailViaApi } from "@/lib/mail/send-mail-client";
 import { Loader2, Mail, Send } from "lucide-react";
 import { useEffect, useState } from "react";
 
@@ -79,10 +80,22 @@ export default function CustomerEmailModal({
     }
     setSending(true);
     setError(null);
-    await new Promise((r) => setTimeout(r, 900));
-    setSending(false);
-    onSent?.();
-    onClose();
+    try {
+      await sendMailViaApi({
+        to: to.trim(),
+        cc: cc.trim() || undefined,
+        subject: subject.trim() || `Message from ${companyName ?? "your firm"}`,
+        message: message.trim(),
+        templateId: "generic",
+        companyName: companyName ?? "Company",
+      });
+      onSent?.();
+      onClose();
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Could not send email.");
+    } finally {
+      setSending(false);
+    }
   }
 
   return (

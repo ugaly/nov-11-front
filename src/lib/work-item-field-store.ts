@@ -180,25 +180,49 @@ export function toApiAttachmentRef(
   };
 }
 
+function fieldByIdMap(fields: WorkItemFieldDefinition[]) {
+  return new Map(fields.map((f) => [f.id, f]));
+}
+
+/**
+ * One field value for PATCH/PUT/closure.
+ * FILE: omit `attachments` to keep server files; `attachments: []` clears; list replaces.
+ */
+export function prepareFieldValueForApi(
+  v: WorkItemFieldValue,
+  field?: WorkItemFieldDefinition
+): WorkItemFieldValue {
+  const out: WorkItemFieldValue = { fieldId: v.fieldId };
+  if (v.value !== undefined) out.value = v.value;
+  if (v.tableRows !== undefined) out.tableRows = v.tableRows;
+
+  if (field?.widget !== "FILE") return out;
+
+  if (v.attachments == null) return out;
+
+  if (v.attachments.length === 0) {
+    return { ...out, attachments: [], fileNames: [] };
+  }
+
+  const uploaded = v.attachments.filter(
+    (a) => isUuidFieldId(a.id) && Boolean(a.url)
+  );
+  if (!uploaded.length) return out;
+
+  return {
+    ...out,
+    attachments: uploaded.map(toApiAttachmentRef),
+    fileNames: uploaded.map((a) => a.name),
+  };
+}
+
 /** Strip local-only files; backend requires UUID attachment ids from POST field-files. */
 export function prepareFieldValuesForApi(
-  values: WorkItemFieldValue[]
+  values: WorkItemFieldValue[],
+  fields: WorkItemFieldDefinition[] = []
 ): WorkItemFieldValue[] {
-  return values.map((v) => {
-    if (!v.attachments?.length) {
-      return { fieldId: v.fieldId, value: v.value, tableRows: v.tableRows };
-    }
-
-    const uploaded = v.attachments.filter(
-      (a) => isUuidFieldId(a.id) && Boolean(a.url)
-    );
-
-    return {
-      fieldId: v.fieldId,
-      attachments: uploaded.map(toApiAttachmentRef),
-      fileNames: uploaded.map((a) => a.name),
-    };
-  });
+  const map = fieldByIdMap(fields);
+  return values.map((v) => prepareFieldValueForApi(v, map.get(v.fieldId)));
 }
 
 export function findInvalidAttachmentIds(

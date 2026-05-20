@@ -14,6 +14,7 @@ import {
 import Button from "@/components/ui/button/Button";
 import { Modal } from "@/components/ui/modal";
 import { useCompanyContext } from "@/hooks/useCompanyContext";
+import { downloadInvoicePdf } from "@/lib/export/invoice-document-pdf";
 import { getDummyInvoiceById } from "@/lib/invoices/invoice-dummy-data";
 import type { InvoiceRecord } from "@/lib/invoices/invoice-types";
 import {
@@ -55,6 +56,7 @@ export default function InvoiceDetailPanel({ invoiceId }: { invoiceId: string })
   const [paidModalOpen, setPaidModalOpen] = useState(false);
   const [actionNote, setActionNote] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
+  const [pdfBusy, setPdfBusy] = useState(false);
   const [editing, setEditing] = useState(false);
   const [editDraft, setEditDraft] = useState<InvoiceRecord | null>(null);
 
@@ -269,10 +271,26 @@ export default function InvoiceDetailPanel({ invoiceId }: { invoiceId: string })
           <Button
             size="sm"
             variant="outline"
-            onClick={() => alert("PDF download — connect API later.")}
+            disabled={pdfBusy}
+            onClick={() => {
+              setPdfBusy(true);
+              void downloadInvoicePdf(inv, companyName ?? "Company")
+                .catch((err) =>
+                  alert(
+                    err instanceof Error
+                      ? err.message
+                      : "Could not download PDF."
+                  )
+                )
+                .finally(() => setPdfBusy(false));
+            }}
           >
-            <Download className="mr-1.5 size-4" aria-hidden />
-            PDF
+            {pdfBusy ? (
+              <Loader2 className="mr-1.5 size-4 animate-spin" aria-hidden />
+            ) : (
+              <Download className="mr-1.5 size-4" aria-hidden />
+            )}
+            {pdfBusy ? "Preparing…" : "PDF"}
           </Button>
           <Button
             size="sm"

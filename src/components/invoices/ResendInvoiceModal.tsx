@@ -8,6 +8,8 @@ import Label from "@/components/form/Label";
 import { Modal } from "@/components/ui/modal";
 import { useCompanyContext } from "@/hooks/useCompanyContext";
 import { invoiceMessageTextareaClass } from "@/components/invoices/invoice-form-styles";
+import { generateInvoicePdf } from "@/lib/export/invoice-document-pdf";
+import { sendMailViaApi } from "@/lib/mail/send-mail-client";
 import { formatInvoiceAmount } from "@/lib/invoices/invoice-utils";
 import { Loader2, Mail, Send } from "lucide-react";
 import { useEffect, useState } from "react";
@@ -31,6 +33,8 @@ export default function ResendInvoiceModal({
   const [subject, setSubject] = useState("");
   const [message, setMessage] = useState("");
   const [sending, setSending] = useState(false);
+  const [attachPdf, setAttachPdf] = useState(true);
+  const [sendError, setSendError] = useState<string | null>(null);
 
   useEffect(() => {
     if (!isOpen) return;
@@ -44,11 +48,39 @@ export default function ResendInvoiceModal({
   }, [isOpen, invoice, companyName]);
 
   async function handleSend() {
+    if (!to.trim()) {
+      setSendError("Recipient email is required.");
+      return;
+    }
     setSending(true);
-    await new Promise((r) => setTimeout(r, 900));
-    setSending(false);
-    onSent?.();
-    onClose();
+    setSendError(null);
+    try {
+      let pdfFilename: string | undefined;
+      let pdfBase64: string | undefined;
+      if (attachPdf) {
+        const pdf = await generateInvoicePdf(invoice, companyName ?? "Company");
+        pdfFilename = pdf.filename;
+        pdfBase64 = pdf.base64;
+      }
+      await sendMailViaApi({
+        to: to.trim(),
+        cc: cc.trim() || undefined,
+        subject: subject.trim(),
+        message: message.trim(),
+        templateId: "invoice-reminder",
+        companyName: companyName ?? "Company",
+        pdfFilename,
+        pdfBase64,
+      });
+      onSent?.();
+      onClose();
+    } catch (err) {
+      setSendError(
+        err instanceof Error ? err.message : "Could not send invoice."
+      );
+    } finally {
+      setSending(false);
+    }
   }
 
   return (
@@ -73,8 +105,11 @@ export default function ResendInvoiceModal({
         </div>
 
         <div className="grid min-h-[min(520px,62vh)] flex-1 grid-cols-1 overflow-hidden lg:grid-cols-2">
-          <div className="flex min-h-0 flex-col overflow-y-auto border-b border-gray-200 p-6 dark:border-gray-800 lg:border-b-0 lg:border-r">
+            <div className="flex min-h-0 flex-col overflow-y-auto border-b border-gray-200 p-6 dark:border-gray-800 lg:border-b-0 lg:border-r">
             <div className="flex min-h-full flex-col gap-5">
+              {sendError ? (
+                <p className="text-sm text-error-600">{sendError}</p>
+              ) : null}
               <div>
                 <Label>To</Label>
                 <Input
@@ -112,7 +147,12 @@ export default function ResendInvoiceModal({
                 />
               </div>
               <label className="flex cursor-pointer items-center gap-2 text-sm text-gray-600 dark:text-gray-400">
-                <input type="checkbox" defaultChecked className="rounded border-gray-300" />
+                <input
+                  type="checkbox"
+                  checked={attachPdf}
+                  onChange={(e) => setAttachPdf(e.target.checked)}
+                  className="rounded border-gray-300"
+                />
                 Attach PDF copy of invoice
               </label>
             </div>

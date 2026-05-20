@@ -39,6 +39,10 @@ import {
   Plus,
   XCircle,
 } from "lucide-react";
+import {
+  loadLastEngagementTab,
+  saveLastEngagementTab,
+} from "@/lib/customer-engagement-tab-storage";
 import React, { useCallback, useEffect, useRef, useState } from "react";
 
 function statusIcon(status: EngagementStatus): LucideIcon {
@@ -78,6 +82,16 @@ export default function CustomerDetailPanel({
   const [error, setError] = useState<string | null>(null);
   const [engagementModalOpen, setEngagementModalOpen] = useState(false);
 
+  const selectEngagement = useCallback(
+    (engagementId: string) => {
+      setSelectedId(engagementId);
+      if (companyId) {
+        saveLastEngagementTab(companyId, customerId, engagementId);
+      }
+    },
+    [companyId, customerId]
+  );
+
   const load = useCallback(async () => {
     if (!companyId) return;
     setLoading(true);
@@ -90,9 +104,16 @@ export default function CustomerDetailPanel({
       setCustomer(c);
       setEngagements(e);
       if (e.length > 0) {
-        setSelectedId((prev) =>
-          prev && e.some((x) => x.id === prev) ? prev : e[0]!.id
-        );
+        const remembered = loadLastEngagementTab(companyId, customerId);
+        setSelectedId((prev) => {
+          const candidates = [prev, remembered].filter(
+            (id): id is string => Boolean(id)
+          );
+          for (const id of candidates) {
+            if (e.some((x) => x.id === id)) return id;
+          }
+          return e[0]!.id;
+        });
       } else {
         setSelectedId(null);
         setActiveDetail(null);
@@ -271,7 +292,7 @@ export default function CustomerDetailPanel({
                           type="button"
                           role="tab"
                           aria-selected={active}
-                          onClick={() => setSelectedId(e.id)}
+                          onClick={() => selectEngagement(e.id)}
                           className={`flex shrink-0 items-center gap-2 rounded-t-lg border px-5 py-3 text-sm font-medium transition-colors ${
                             active
                               ? "border-gray-200 border-b-white bg-white text-brand-600 shadow-sm dark:border-gray-700 dark:border-b-gray-900 dark:bg-gray-900 dark:text-brand-400"
@@ -348,6 +369,7 @@ export default function CustomerDetailPanel({
                     <EngagementDetailBody
                       companyId={companyId}
                       engagement={activeDetail}
+                      customer={customer}
                       showOpenLink
                       onEngagementRefresh={async () => {
                         if (!selectedId) return;
@@ -369,7 +391,7 @@ export default function CustomerDetailPanel({
               setEngagementModalOpen(false);
               void (async () => {
                 await load();
-                setSelectedId(created.id);
+                selectEngagement(created.id);
                 detailCache.current.delete(created.id);
               })();
             }}

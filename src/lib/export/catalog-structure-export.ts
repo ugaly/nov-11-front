@@ -1,9 +1,5 @@
 import type { ServiceCatalogNodeResponse } from "@/api/types/template-config";
-import {
-  CATALOG_NODE_HEADERS,
-  catalogNodeRowsToMatrix,
-  flattenCatalogNodes,
-} from "@/lib/export/flatten-catalog-nodes";
+import { buildCatalogStructureExportData } from "@/lib/export/catalog-structure-table";
 import { downloadExcel } from "@/lib/export/excel";
 import {
   addPdfTable,
@@ -25,16 +21,16 @@ export async function exportCatalogStructurePdf(
   categoryName: string,
   nodes: ServiceCatalogNodeResponse[]
 ): Promise<void> {
-  const flat = flattenCatalogNodes(nodes);
+  const data = buildCatalogStructureExportData(nodes);
   const { doc, startY } = await createBrandedPdf({
     title: "Service catalog structure",
     companyName,
-    subtitle: `${categoryName} · ${catalogName} · ${flat.length} node${flat.length === 1 ? "" : "s"}`,
+    subtitle: `${categoryName} · ${catalogName} · ${data.excelRows.length} item${data.excelRows.length === 1 ? "" : "s"}`,
   });
 
   addPdfTable(doc, startY, {
-    head: [Array.from(CATALOG_NODE_HEADERS)],
-    body: catalogNodeRowsToMatrix(flat),
+    head: [data.headers],
+    body: data.pdfBody,
   });
 
   savePdf(doc, `${exportBasename(companyName, catalogName)}.pdf`);
@@ -45,12 +41,13 @@ export function exportCatalogStructureExcel(
   catalogName: string,
   nodes: ServiceCatalogNodeResponse[]
 ): void {
-  const flat = flattenCatalogNodes(nodes);
+  const data = buildCatalogStructureExportData(nodes);
   downloadExcel(`${exportBasename(companyName, catalogName)}.xlsx`, [
     {
       name: "Structure",
-      headers: Array.from(CATALOG_NODE_HEADERS),
-      rows: catalogNodeRowsToMatrix(flat),
+      headers: data.headers,
+      rows: data.excelRows,
+      merges: data.merges,
     },
   ]);
 }

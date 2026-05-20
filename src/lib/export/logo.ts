@@ -1,5 +1,6 @@
 import {
   EXPORT_LOGO_PATH,
+  INVOICE_EXPORT_LOGO_PATH,
   LOGO_FALLBACK_PATHS,
 } from "@/lib/export/constants";
 
@@ -53,4 +54,9 @@ export async function loadExportLogo(): Promise<LogoDataUrl | null> {
     if (logo) return logo;
   }
   return null;
+}
+
+/** Invoice document PDF — uses `invoice-logo.png` (white background). */
+export async function loadInvoiceExportLogo(): Promise<LogoDataUrl | null> {
+  return tryLoadLogo(INVOICE_EXPORT_LOGO_PATH);
 }

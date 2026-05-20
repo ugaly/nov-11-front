@@ -2,21 +2,30 @@
 
 import type {
   CustomerEngagementResponse,
+  CustomerResponse,
   WorkItemStatus,
 } from "@/api/types/template-config";
 import CatalogStructureModal from "@/components/setup/CatalogStructureModal";
+import ExportListMenu from "@/components/setup/ExportListMenu";
 import FieldBuilderModal from "@/components/setup/FieldBuilderModal";
+import ExportGroupFormButton from "@/components/setup/ExportGroupFormButton";
 import ShareFormLinkButton from "@/components/setup/ShareFormLinkButton";
 import TaskClosureForm from "@/components/setup/TaskClosureForm";
 import TaskClosureSummary from "@/components/setup/TaskClosureSummary";
 import TaskFieldForm from "@/components/setup/TaskFieldForm";
+import WorkItemSubmissionControls from "@/components/setup/WorkItemSubmissionControls";
 import TaskStatusPicker from "@/components/setup/TaskStatusPicker";
 import { useWorkItemClosure } from "@/hooks/useWorkItemClosure";
-import { isClosureStatus, type ClosureStatus } from "@/lib/work-item-closure-store";
+import { useWorkItemOutputFiles } from "@/hooks/useWorkItemOutputFiles";
+import {
+  isClosureStatus,
+  type ClosureStatus,
+} from "@/lib/work-item-closure-store";
 import WorkItemGroupTree from "@/components/setup/WorkItemGroupTree";
 import Button from "@/components/ui/button/Button";
 import { useEngagementWorkItemStatuses } from "@/hooks/useEngagementWorkItemStatuses";
 import { useWorkItemFieldState } from "@/hooks/useWorkItemFieldState";
+import { prepareFieldValuesForApi } from "@/lib/work-item-field-store";
 import {
   buildWorkGroupSections,
   buildWorkItemTree,
@@ -24,17 +33,36 @@ import {
 } from "@/lib/work-item-tree";
 import SetupEmptyState from "@/components/setup/SetupEmptyState";
 import { ClipboardList, ListTree, Settings2, SlidersHorizontal } from "lucide-react";
-import { useMemo, useState } from "react";
+import {
+  loadExpandedGroups,
+  saveExpandedGroups,
+} from "@/lib/work-group-expanded-storage";
+import { workItemHasExportableData } from "@/lib/export/work-item-field-format";
+import {
+  customerForTaskExport,
+  exportWorkItemTaskExcel,
+  exportWorkItemTaskPdf,
+  type WorkItemTaskExportInput,
+} from "@/lib/export/work-item-task-export";
+import { useCompanyContext } from "@/hooks/useCompanyContext";
+import { useCallback, useEffect, useMemo, useState } from "react";
 
 export default function EngagementWorkPanel({
   companyId,
   engagement,
+  customer,
   onEngagementRefresh,
 }: {
   companyId: string;
   engagement: CustomerEngagementResponse;
+  customer?: CustomerResponse;
   onEngagementRefresh?: () => void | Promise<void>;
 }) {
+  const { companyName } = useCompanyContext();
+  const exportCustomer = useMemo(
+    () => customerForTaskExport(engagement, customer),
+    [engagement, customer]
+  );
   const [structureOpen, setStructureOpen] = useState(false);
   const {
     getStatus,
@@ -58,6 +86,25 @@ export default function EngagementWorkPanel({
     () => countWorkItems(mergedWorkItems),
     [mergedWorkItems]
   );
+
+  const [expandedGroups, setExpandedGroups] = useState<Record<string, boolean>>(
+    () => loadExpandedGroups(engagement.id)
+  );
+
+  useEffect(() => {
+    setExpandedGroups(loadExpandedGroups(engagement.id));
+  }, [engagement.id]);
+
+  useEffect(() => {
+    saveExpandedGroups(engagement.id, expandedGroups);
+  }, [engagement.id, expandedGroups]);
+
+  const toggleGroup = useCallback((groupKey: string) => {
+    setExpandedGroups((prev) => ({
+      ...prev,
+      [groupKey]: !prev[groupKey],
+    }));
+  }, []);
 
   const progressPct =
     counts.tasks > 0 ? Math.round((counts.done / counts.tasks) * 100) : 0;
@@ -132,22 +179,49 @@ export default function EngagementWorkPanel({
       <div className="mt-4">
         <WorkItemGroupTree
           sections={sections}
+          expandedGroups={expandedGroups}
+          onToggleGroup={toggleGroup}
           renderGroupActions={(section) => (
-            <ShareFormLinkButton
-              companyId={companyId}
-              engagementId={engagement.id}
-              workItemId={section.key}
-              label="Share group"
-              size="sm"
-            />
+            <div className="flex flex-wrap items-center justify-end gap-2">
+              <ExportGroupFormButton
+                companyId={companyId}
+                engagement={engagement}
+                customer={exportCustomer}
+                companyName={companyName ?? "Company"}
+                section={section}
+              />
+              <ShareFormLinkButton
+                companyId={companyId}
+                engagementId={engagement.id}
+                workItemId={section.key}
+                label="Share group"
+                size="sm"
+              />
+            </div>
           )}
-          renderTask={(task) => (
+          renderTask={(task, ctx) => (
             <TaskWorkCard
               companyId={companyId}
               task={task}
+              engagement={engagement}
+              customer={exportCustomer}
+              companyName={companyName ?? "Company"}
+              groupLabel={
+                ctx.groupNumber > 0
+                  ? ctx.groupTitle ?? `Group ${ctx.groupNumber}`
+                  : null
+              }
               engagementId={engagement.id}
               status={getStatus(task)}
-              onStatusChange={(s) => void setStatus(task.id, s)}
+              onStatusChange={(s) => {
+                if (ctx.groupKey) {
+                  setExpandedGroups((prev) => ({
+                    ...prev,
+                    [ctx.groupKey!]: true,
+                  }));
+                }
+                void setStatus(task.id, s);
+              }}
               onTaskUpdated={onEngagementRefresh}
             />
           )}
@@ -191,9 +265,30 @@ function StatusChip({
   );
 }
 
+function TaskSectionExportMenu({
+  input,
+  disabled,
+}: {
+  input: WorkItemTaskExportInput;
+  disabled?: boolean;
+}) {
+  return (
+    <ExportListMenu
+      label="Export section"
+      disabled={disabled}
+      onExportPdf={() => exportWorkItemTaskPdf(input)}
+      onExportExcel={() => exportWorkItemTaskExcel(input)}
+    />
+  );
+}
+
 function TaskWorkCard({
   companyId,
   task,
+  engagement,
+  customer,
+  companyName,
+  groupLabel,
   engagementId,
   status,
   onStatusChange,
@@ -201,6 +296,10 @@ function TaskWorkCard({
 }: {
   companyId: string;
   task: import("@/api/types/template-config").EngagementWorkItemResponse;
+  engagement: CustomerEngagementResponse;
+  customer: CustomerResponse;
+  companyName: string;
+  groupLabel: string | null;
   engagementId: string;
   status: WorkItemStatus;
   onStatusChange: (status: WorkItemStatus) => void;
@@ -214,6 +313,11 @@ function TaskWorkCard({
     hydrated,
     isConfigured,
     responsesLocked,
+    internalEditEnabled,
+    publicSubmitEnabled,
+    staffEditLocked,
+    controlsSaving,
+    patchSubmissionControls,
     formLinkUrl,
     error: fieldError,
     persistTemplate,
@@ -224,8 +328,22 @@ function TaskWorkCard({
     closureInitial,
   } = useWorkItemFieldState(companyId, engagementId, task.id);
 
+  const closureMode = isClosureStatus(status);
+  const {
+    files: outputFiles,
+    loading: outputFilesLoading,
+    uploading: outputFilesUploading,
+    error: outputFilesError,
+    reload: reloadOutputFiles,
+    uploadFile: uploadOutputFile,
+    removeFile: removeOutputFile,
+  } = useWorkItemOutputFiles(companyId, engagementId, task.id, {
+    enabled: closureMode,
+  });
+
   const afterMutation = async () => {
     await reloadFields();
+    await reloadOutputFiles();
     await onTaskUpdated?.();
   };
 
@@ -262,13 +380,33 @@ function TaskWorkCard({
       return link?.url ?? null;
     },
     onUploadFieldFile: uploadFieldFile,
-    readOnly: responsesLocked,
+    readOnly: staffEditLocked,
   };
+
+  const exportInput: WorkItemTaskExportInput = {
+    companyName,
+    customer,
+    engagement,
+    task,
+    groupLabel,
+    fields,
+    values,
+    status,
+    closureRemark: closure.remark,
+    closureSubmittedAt: closure.submittedAt,
+    outputFiles,
+  };
+
+  const hasExportData = workItemHasExportableData(fields, values, {
+    closureRemark: closure.remark,
+    closureSubmittedAt: closure.submittedAt,
+    outputFiles,
+  });
 
   return (
     <>
       <article className="rounded-xl border border-gray-200 bg-white shadow-sm dark:border-gray-700 dark:bg-gray-900/20">
-        <div className="flex items-center gap-2 border-b border-gray-100 px-3 py-2 dark:border-gray-800 sm:px-4">
+        <div className="flex flex-wrap items-start justify-between gap-2 border-b border-gray-100 px-3 py-2 dark:border-gray-800 sm:px-4">
           <div className="min-w-0 flex-1">
             <h6 className="truncate text-sm font-semibold text-gray-900 dark:text-white">
               {task.name}
@@ -277,7 +415,12 @@ function TaskWorkCard({
               <p className="truncate text-xs text-gray-500">{task.description}</p>
             ) : null}
           </div>
-          <TaskStatusPicker value={status} onChange={onStatusChange} />
+          <div className="flex shrink-0 flex-wrap items-center justify-end gap-2">
+            {hasExportData ? (
+              <TaskSectionExportMenu input={exportInput} />
+            ) : null}
+            <TaskStatusPicker value={status} onChange={onStatusChange} />
+          </div>
         </div>
 
         <div className="p-3 sm:p-4">
@@ -289,16 +432,29 @@ function TaskWorkCard({
           ) : null}
 
           {showSummary && isClosureStatus(status) ? (
-            <TaskClosureSummary
-              status={status as ClosureStatus}
-              remark={closure.remark}
-              submittedAt={closure.submittedAt!}
-              fields={fields}
-              values={values}
-              onReopen={() => void reopenClosure()}
-            />
+            <>
+              <TaskClosureSummary
+                status={status as ClosureStatus}
+                remark={closure.remark}
+                submittedAt={closure.submittedAt!}
+                fields={fields}
+                values={values}
+                outputFiles={outputFiles}
+                onReopen={() => void reopenClosure()}
+              />
+            </>
           ) : isClosure ? (
-            <TaskClosureForm
+            <>
+              {isConfigured ? (
+                <WorkItemSubmissionControls
+                  publicSubmitEnabled={publicSubmitEnabled}
+                  internalEditEnabled={internalEditEnabled}
+                  responsesLocked={responsesLocked}
+                  saving={controlsSaving}
+                  onSave={patchSubmissionControls}
+                />
+              ) : null}
+              <TaskClosureForm
               status={status as ClosureStatus}
               fields={fields}
               values={values}
@@ -307,24 +463,33 @@ function TaskWorkCard({
               remark={closure.remark}
               isConfigured={isConfigured}
               onRemarkChange={setRemark}
-              onSaveValues={(v) => void persistValues(v)}
-              onSubmit={(nextValues, remark) => {
-                void (async () => {
-                  await persistValues(nextValues);
-                  await submitClosure(
-                    status as ClosureStatus,
-                    remark,
-                    nextValues
-                  );
-                })();
+              onSaveValues={() => {}}
+              onSubmit={async (nextValues, remark) => {
+                await submitClosure(
+                  status as ClosureStatus,
+                  remark,
+                  prepareFieldValuesForApi(nextValues, fields),
+                  outputFiles.map((f) => f.id)
+                );
               }}
               onEditFields={
                 isConfigured ? () => setBuilderOpen(true) : undefined
               }
               formLinkUrl={formLinkUrl}
               onUploadFieldFile={uploadFieldFile}
-              responsesLocked={responsesLocked}
+              responsesLocked={staffEditLocked}
+              outputFiles={outputFiles}
+              outputFilesLoading={outputFilesLoading}
+              outputFilesUploading={outputFilesUploading}
+              outputFilesError={outputFilesError}
+              onUploadOutputFile={async (file) => {
+                await uploadOutputFile(file);
+              }}
+              onRemoveOutputFile={async (fileId) => {
+                await removeOutputFile(fileId);
+              }}
             />
+            </>
           ) : !isConfigured ? (
             <SetupEmptyState
               icon={SlidersHorizontal}
@@ -344,6 +509,13 @@ function TaskWorkCard({
             />
           ) : (
             <>
+              <WorkItemSubmissionControls
+                publicSubmitEnabled={publicSubmitEnabled}
+                internalEditEnabled={internalEditEnabled}
+                responsesLocked={responsesLocked}
+                saving={controlsSaving}
+                onSave={patchSubmissionControls}
+              />
               <div className="mb-3 flex flex-wrap justify-end gap-2">
                 <Button
                   type="button"

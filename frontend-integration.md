@@ -31,7 +31,7 @@ This avoids `409 field_id_in_use` when a previous save partially created rows or
 
 **Dev verification:** On save, the console logs `[work-item] PUT field-template` with `ids` and `duplicateFieldIds` (empty in production). In DevTools → Network → PUT, confirm each `fields[].id` is a unique UUID.
 
-**Field values / FILE uploads:** Upload each file via `POST .../field-files?fieldId=` first. Attachments in `PUT .../field-values` must use the returned **UUID** `id` and `url` — not local `att_*` ids or base64. Remove old file tiles and re-add if you see `invalid_field_id`.
+**Field values / FILE uploads:** Upload each file via `POST .../field-files?fieldId=` first. Staff saves use **`PATCH .../field-values`** (partial — only fields in the body). For **FILE** fields: omit `attachments` to keep server files; `attachments: []` clears; send full list to replace. Closure deliverables use **`POST .../output-files` only** — do not `PATCH` field-values when uploading output files. Attachments must use UUID `id` + `url` from field-files POST.
 
 ---
 
@@ -39,9 +39,12 @@ This avoids `409 field_id_in_use` when a previous save partially created rows or
 
 | UI / hook | Implementation |
 |-----------|----------------|
-| `useWorkItemFieldState` | `GET .../execution` (template, values, formLink, closure snapshot) |
+| `useWorkItemFieldState` | `GET .../execution` (template, values, formLink, closure, submission flags) |
+| `WorkItemSubmissionControls` | `GET/PATCH .../submission-controls` — customer submit + staff edit toggles |
 | `useEngagementWorkItemStatuses` | `PATCH .../work-items/{id}` + engagement refresh |
-| `useWorkItemClosure` | `POST .../closure`, `POST .../closure/reopen` |
+| `useWorkItemClosure` | `POST .../closure` (`remark`, `outputFileIds`, optional `values`), `POST .../closure/reopen` |
+| `useWorkItemOutputFiles` | `GET/POST/DELETE .../output-files` — closure deliverables before submit |
+| `TaskClosureForm` | Remark textarea + `ClosureOutputFilesField` upload/list |
 | `FileAttachmentField` | `POST .../field-files?fieldId=` when `onUploadFile` provided |
 | Task link copy | `formLink.url` / `POST .../form-link` via `ensureFormLink` |
 | Group link | `ShareFormLinkButton` on group header → `POST .../form-link` on GROUP |
@@ -60,6 +63,27 @@ This avoids `409 field_id_in_use` when a previous save partially created rows or
 
 ---
 
+## Task section export (customer detail → Work)
+
+Each configured task row has **Export section** (PDF / Excel) beside status when saved data exists from the API.
+
+- **PDF:** Branded header card, customer details, engagement/task metadata, captured field values, closure remark/deliverables list, then merged attachment pages.
+- **Excel:** Sheets for customer, engagement, responses, closure, and file URLs.
+
+## Group manual form (Export file)
+
+Each group header has **Export file** beside **Share group**.
+
+- Builds a **printable two-column PDF** (field name | space to fill) for all configured tasks in the group.
+- Modal sharing: **Download PDF**, **Print**, **WhatsApp** (prefilled message), **Send email** (PDF attachment via SMTP).
+- File fields include a note that attachments must be provided separately; a summary list appears at the end of the PDF.
+
+Configure SMTP in `.env.local` (`SMTP_HOST`, `SMTP_USER`, `SMTP_PASS`, `MAIL_FROM`). Never commit credentials.
+
+Implementation: `src/lib/export/work-item-printable-form-export.ts`, `src/components/setup/ExportGroupFormButton.tsx`, `POST /api/send-form-email`.
+
+---
+
 ## Error handling
 
 Use `getApiErrorCode` / `getApiErrorMessage` from `src/api/errors.ts`. The API `message` is shown in the UI; branch on `error` when needed:
@@ -72,8 +96,9 @@ Use `getApiErrorCode` / `getApiErrorMessage` from `src/api/errors.ts`. The API `
 | `empty_body` | Missing request body |
 | `invalid_uuid` | Another UUID field invalid |
 | `bad_request` | Other validation / parse issues |
-| `RESPONSES_LOCKED` | Save values while locked |
-| `FORM_ALREADY_SUBMITTED` | Public submit on locked form |
+| `RESPONSES_LOCKED` | Staff save after office closure (`responsesLocked`) |
+| `INTERNAL_EDIT_DISABLED` | Staff save while `internalEditEnabled: false` |
+| `FORM_ALREADY_SUBMITTED` | Public submit when `publicSubmitEnabled: false` |
 | `FORM_DISABLED` | Link disabled or expired |
 | `PUBLIC_TOKEN_NOT_FOUND` | Bad public token |
 | `TEMPLATE_NOT_CONFIGURED` | Create link before template exists |

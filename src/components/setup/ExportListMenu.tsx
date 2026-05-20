@@ -8,12 +8,15 @@ import React, { useState } from "react";
 
 type ExportListMenuProps = {
   disabled?: boolean;
+  /** Button label (default: Export list). */
+  label?: string;
   onExportPdf: () => void | Promise<void>;
   onExportExcel: () => void | Promise<void>;
 };
 
 export default function ExportListMenu({
   disabled,
+  label = "Export list",
   onExportPdf,
   onExportExcel,
 }: ExportListMenuProps) {
@@ -44,7 +47,7 @@ export default function ExportListMenu({
         className="dropdown-toggle"
       >
         <Download className="mr-1.5 size-4" aria-hidden />
-        {exporting ? "Exporting…" : "Export list"}
+        {exporting ? "Exporting…" : label}
       </Button>
       <Dropdown isOpen={open} onClose={() => setOpen(false)} className="w-48 p-2">
         <DropdownItem

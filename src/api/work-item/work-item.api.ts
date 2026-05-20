@@ -2,6 +2,7 @@ import { apiClient } from "@/api/client";
 import type {
   CreateFormLinkRequest,
   PatchFormLinkRequest,
+  PatchWorkItemSubmissionControlsRequest,
   PublicSubmitResponse,
   PublicWorkItemFormResponse,
   PutFieldTemplateRequest,
@@ -14,6 +15,7 @@ import type {
   WorkItemFieldValuesResponse,
   WorkItemFileDto,
   WorkItemFormLinkResponse,
+  WorkItemSubmissionControlsResponse,
 } from "@/api/types/work-item-api";
 import type { EngagementWorkItemResponse } from "@/api/types/template-config";
 
@@ -119,6 +121,30 @@ export async function deleteWorkItemFieldValues(
   );
 }
 
+export async function getWorkItemSubmissionControls(
+  companyId: string,
+  engagementId: string,
+  workItemId: string
+): Promise<WorkItemSubmissionControlsResponse> {
+  const { data } = await apiClient.get<WorkItemSubmissionControlsResponse>(
+    `${workItemBase(companyId, engagementId, workItemId)}/submission-controls`
+  );
+  return data;
+}
+
+export async function patchWorkItemSubmissionControls(
+  companyId: string,
+  engagementId: string,
+  workItemId: string,
+  body: PatchWorkItemSubmissionControlsRequest
+): Promise<WorkItemSubmissionControlsResponse> {
+  const { data } = await apiClient.patch<WorkItemSubmissionControlsResponse>(
+    `${workItemBase(companyId, engagementId, workItemId)}/submission-controls`,
+    body
+  );
+  return data;
+}
+
 export async function patchWorkItemStatus(
   companyId: string,
   engagementId: string,
@@ -199,10 +225,12 @@ export async function deleteWorkItemOutputFile(
   companyId: string,
   engagementId: string,
   workItemId: string,
-  fileId: string
+  fileId: string,
+  force = false
 ): Promise<void> {
   await apiClient.delete(
-    `${workItemBase(companyId, engagementId, workItemId)}/output-files/${fileId}`
+    `${workItemBase(companyId, engagementId, workItemId)}/output-files/${fileId}`,
+    { params: force ? { force: true } : undefined }
   );
 }
 

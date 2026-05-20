@@ -1,6 +1,9 @@
 "use client";
 
-import type { CustomerEngagementResponse } from "@/api/types/template-config";
+import type {
+  CustomerEngagementResponse,
+  CustomerResponse,
+} from "@/api/types/template-config";
 import { formatEngagementPeriod } from "@/lib/template-recurrence";
 import EngagementWorkPanel from "@/components/setup/EngagementWorkPanel";
 import { EngagementStatusBadge } from "@/components/setup/setup-pro-ui";
@@ -10,11 +13,14 @@ import { CalendarRange, ExternalLink } from "lucide-react";
 export default function EngagementDetailBody({
   companyId,
   engagement,
+  customer,
   showOpenLink = false,
   onEngagementRefresh,
 }: {
   companyId: string;
   engagement: CustomerEngagementResponse;
+  /** When omitted (standalone engagement page), export uses engagement customer fields only. */
+  customer?: CustomerResponse;
   showOpenLink?: boolean;
   onEngagementRefresh?: () => void | Promise<void>;
 }) {
@@ -61,6 +67,7 @@ export default function EngagementDetailBody({
       <EngagementWorkPanel
         companyId={companyId}
         engagement={engagement}
+        customer={customer}
         onEngagementRefresh={onEngagementRefresh}
       />
     </div>

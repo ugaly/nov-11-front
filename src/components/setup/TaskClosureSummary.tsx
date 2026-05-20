@@ -3,7 +3,9 @@
 import type {
   WorkItemFieldDefinition,
   WorkItemFieldValue,
+  WorkItemFileAttachment,
 } from "@/api/types/work-item-template";
+import ClosureOutputFilesField from "@/components/setup/ClosureOutputFilesField";
 import FileAttachmentField from "@/components/setup/FileAttachmentField";
 import { statusLabel } from "@/components/setup/TaskStatusPicker";
 import { getAttachments } from "@/lib/work-item-file-utils";
@@ -83,6 +85,7 @@ export default function TaskClosureSummary({
   submittedAt,
   fields,
   values,
+  outputFiles = [],
   onReopen,
 }: {
   status: ClosureStatus;
@@ -90,13 +93,15 @@ export default function TaskClosureSummary({
   submittedAt: string;
   fields: WorkItemFieldDefinition[];
   values: WorkItemFieldValue[];
+  outputFiles?: WorkItemFileAttachment[];
   onReopen?: () => void;
 }) {
   const meta = STATUS_META[status];
   const Icon = meta.icon;
   const valueMap = Object.fromEntries(values.map((v) => [v.fieldId, v]));
   const hasFields = fields.length > 0;
-  const hasRemark = remark.trim().length > 0;
+  const remarkText = remark.trim();
+  const hasOutputFiles = outputFiles.length > 0;
 
   return (
     <div className="overflow-hidden rounded-xl border border-gray-200 dark:border-gray-700">
@@ -134,20 +139,6 @@ export default function TaskClosureSummary({
               })}
             </td>
           </tr>
-
-          {hasRemark ? (
-            <tr className="bg-gray-50/80 dark:bg-gray-900/40">
-              <th
-                scope="row"
-                className="align-top px-4 py-2.5 text-left text-xs font-medium uppercase tracking-wide text-gray-500"
-              >
-                Remark
-              </th>
-              <td className="whitespace-pre-wrap px-4 py-2.5 text-gray-800 dark:text-gray-200">
-                {remark.trim()}
-              </td>
-            </tr>
-          ) : null}
 
           {hasFields ? (
             <>
@@ -255,6 +246,41 @@ export default function TaskClosureSummary({
               </td>
             </tr>
           )}
+
+          <tr className="bg-gray-50/80 dark:bg-gray-900/40">
+            <th
+              scope="row"
+              className="align-top px-4 py-2.5 text-left text-xs font-medium uppercase tracking-wide text-gray-500"
+            >
+              Remark
+            </th>
+            <td className="whitespace-pre-wrap px-4 py-2.5 text-gray-800 dark:text-gray-200">
+              {remarkText || "—"}
+            </td>
+          </tr>
+
+          {hasOutputFiles ? (
+            <>
+              <tr className="bg-brand-50/40 dark:bg-brand-950/20">
+                <th
+                  colSpan={2}
+                  className="px-4 py-2 text-left text-xs font-semibold uppercase tracking-wide text-brand-700 dark:text-brand-300"
+                >
+                  Deliverables
+                </th>
+              </tr>
+              <tr className="bg-white dark:bg-gray-900/20">
+                <td colSpan={2} className="px-4 pb-4 pt-1">
+                  <ClosureOutputFilesField
+                    files={outputFiles}
+                    readOnly
+                    compact
+                    hideLabel
+                  />
+                </td>
+              </tr>
+            </>
+          ) : null}
         </tbody>
       </table>
 

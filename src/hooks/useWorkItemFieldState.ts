@@ -7,10 +7,18 @@ import {
   getWorkItemFieldTemplate,
   postWorkItemFieldFile,
   postWorkItemFormLink,
+  patchWorkItemSubmissionControls,
+  patchWorkItemFieldValues,
   putWorkItemFieldTemplate,
-  putWorkItemFieldValues,
 } from "@/api/work-item/work-item.api";
-import type { WorkItemFormLinkSummaryDto } from "@/api/types/work-item-api";
+import type {
+  PatchWorkItemSubmissionControlsRequest,
+  WorkItemFormLinkSummaryDto,
+} from "@/api/types/work-item-api";
+import {
+  isStaffFieldEditLocked,
+  syncSubmissionControlsFromExecution,
+} from "@/lib/work-item-submission-controls";
 import type {
   WorkItemFieldDefinition,
   WorkItemFieldValue,
@@ -46,6 +54,9 @@ export function useWorkItemFieldState(
   const [values, setValues] = useState<WorkItemFieldValue[]>([]);
   const [savedAt, setSavedAt] = useState<string | null>(null);
   const [responsesLocked, setResponsesLocked] = useState(false);
+  const [internalEditEnabled, setInternalEditEnabled] = useState(true);
+  const [publicSubmitEnabled, setPublicSubmitEnabled] = useState(true);
+  const [controlsSaving, setControlsSaving] = useState(false);
   const [formLink, setFormLink] = useState<WorkItemFormLinkSummaryDto | null>(
     null
   );
@@ -69,11 +80,17 @@ export function useWorkItemFieldState(
       const template = bundle.template;
       setFields(template?.fields ?? []);
       setConfiguredAt(template?.configuredAt ?? null);
-      setValues(normalizeAttachments(bundle.values?.values ?? []));
+      const closureValues = bundle.closure?.values;
+      const valueRows =
+        bundle.closure?.submittedAt && closureValues?.length
+          ? closureValues
+          : bundle.values?.values ?? [];
+      setValues(normalizeAttachments(valueRows));
       setSavedAt(bundle.values?.savedAt ?? null);
-      setResponsesLocked(
-        bundle.responsesLocked ?? bundle.values?.responsesLocked ?? false
-      );
+      const controls = syncSubmissionControlsFromExecution(bundle);
+      setResponsesLocked(controls.responsesLocked);
+      setInternalEditEnabled(controls.internalEditEnabled);
+      setPublicSubmitEnabled(controls.publicSubmitEnabled);
       setFormLink(bundle.formLink ?? template?.formLink ?? null);
       setClosureInitial({
         remark: bundle.closure?.remark ?? null,
@@ -184,8 +201,8 @@ export function useWorkItemFieldState(
           throw new Error(msg);
         }
 
-        const valuesForApi = prepareFieldValuesForApi(next);
-        const res = await putWorkItemFieldValues(
+        const valuesForApi = prepareFieldValuesForApi(next, fields);
+        const res = await patchWorkItemFieldValues(
           companyId,
           engagementId,
           workItemId,
@@ -193,21 +210,30 @@ export function useWorkItemFieldState(
         );
         setValues(normalizeAttachments(res.values));
         setSavedAt(res.savedAt);
-        setResponsesLocked(res.responsesLocked);
+        const controls = syncSubmissionControlsFromExecution({
+          responsesLocked: res.responsesLocked,
+          internalEditEnabled: res.internalEditEnabled,
+        });
+        setResponsesLocked(controls.responsesLocked);
+        setInternalEditEnabled(controls.internalEditEnabled);
       } catch (err) {
         const code = getApiErrorCode(err);
         setError(
           getApiErrorMessage(
             err,
-            code === "invalid_field_id"
-              ? "Invalid file reference. Remove file attachments and upload again."
-              : "Could not save responses."
+            code === "INTERNAL_EDIT_DISABLED"
+              ? "Staff editing is disabled for this task. Turn on “Allow staff to edit responses” in Form access."
+              : code === "RESPONSES_LOCKED"
+                ? "Responses are locked after office closure."
+                : code === "invalid_field_id"
+                  ? "Invalid file reference. Remove file attachments and upload again."
+                  : "Could not save responses."
           )
         );
         throw err;
       }
     },
-    [companyId, engagementId, workItemId]
+    [companyId, engagementId, workItemId, fields]
   );
 
   const uploadFieldFile = useCallback(
@@ -239,6 +265,7 @@ export function useWorkItemFieldState(
         publicToken: link.publicToken,
         linkScope: link.linkScope,
         edited: link.edited,
+        publicSubmitEnabled: link.publicSubmitEnabled,
         enabled: link.enabled,
         expiresAt: link.expiresAt,
       };
@@ -250,6 +277,39 @@ export function useWorkItemFieldState(
     }
   }, [companyId, engagementId, workItemId]);
 
+  const patchSubmissionControls = useCallback(
+    async (patch: PatchWorkItemSubmissionControlsRequest) => {
+      if (!companyId) return;
+      setControlsSaving(true);
+      setError(null);
+      try {
+        const res = await patchWorkItemSubmissionControls(
+          companyId,
+          engagementId,
+          workItemId,
+          patch
+        );
+        setResponsesLocked(res.responsesLocked);
+        setInternalEditEnabled(res.internalEditEnabled);
+        setPublicSubmitEnabled(res.publicSubmitEnabled);
+        await reload();
+      } catch (err) {
+        setError(
+          getApiErrorMessage(err, "Could not update form access settings.")
+        );
+        throw err;
+      } finally {
+        setControlsSaving(false);
+      }
+    },
+    [companyId, engagementId, workItemId, reload]
+  );
+
+  const staffEditLocked = isStaffFieldEditLocked({
+    internalEditEnabled,
+    responsesLocked,
+  });
+
   return {
     fields,
     values,
@@ -258,6 +318,11 @@ export function useWorkItemFieldState(
     hydrated,
     isConfigured,
     responsesLocked,
+    internalEditEnabled,
+    publicSubmitEnabled,
+    staffEditLocked,
+    controlsSaving,
+    patchSubmissionControls,
     formLink,
     formLinkUrl: formLink?.url ?? null,
     error,

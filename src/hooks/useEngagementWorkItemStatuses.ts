@@ -35,12 +35,7 @@ export function useEngagementWorkItemStatuses(
         await patchWorkItemStatus(companyId, engagementId, workItemId, {
           status,
         });
-        await onRefresh?.();
-        setOptimistic((prev) => {
-          const next = { ...prev };
-          delete next[workItemId];
-          return next;
-        });
+        // Keep optimistic status — no full engagement reload (avoids collapsing groups).
       } catch (err) {
         setOptimistic((prev) => {
           const next = { ...prev };
@@ -51,7 +46,7 @@ export function useEngagementWorkItemStatuses(
         setStatusError(getApiErrorMessage(err, "Could not update status."));
       }
     },
-    [companyId, engagementId, onRefresh]
+    [companyId, engagementId]
   );
 
   const mergedWorkItems = workItems.map((w) => ({

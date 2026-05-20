@@ -1,7 +1,10 @@
-import { APP_LOGO_SRC } from "@/lib/brand-logo";
+import { APP_LOGO_SRC, INVOICE_LOGO_SRC } from "@/lib/brand-logo";
 
 /** Same asset as the app sidebar (`AppSidebar`). */
 export const EXPORT_LOGO_PATH = APP_LOGO_SRC;
+
+/** Invoice PDF download / email attachment. */
+export const INVOICE_EXPORT_LOGO_PATH = INVOICE_LOGO_SRC;
 
 export const LOGO_FALLBACK_PATHS = [
   "/images/logo/logo-dark.svg",

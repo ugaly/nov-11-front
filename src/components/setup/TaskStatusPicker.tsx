@@ -57,7 +57,7 @@ export function statusLabel(status: WorkItemStatus): string {
   return OPTIONS.find((o) => o.status === status)?.label ?? status;
 }
 
-/** Inline icon row — active status is highlighted (no separate badge needed). */
+/** Status control — icon + label on each button (active state is highlighted). */
 export default function TaskStatusPicker({
   value,
   onChange,
@@ -69,9 +69,9 @@ export default function TaskStatusPicker({
 }) {
   return (
     <div
-      className="flex shrink-0 flex-wrap items-center justify-end gap-0.5"
+      className="flex min-w-0 flex-wrap items-center justify-end gap-1"
       role="group"
-      aria-label={`Status: ${statusLabel(value)}`}
+      aria-label={`Task status: ${statusLabel(value)}`}
     >
       {OPTIONS.map((opt) => {
         const Icon = opt.icon;
@@ -80,18 +80,18 @@ export default function TaskStatusPicker({
           <button
             key={opt.status}
             type="button"
-            title={opt.label}
-            aria-label={opt.label}
+            aria-label={`Set status to ${opt.label}`}
             aria-pressed={active}
             disabled={disabled}
             onClick={() => onChange(opt.status)}
-            className={`inline-flex size-8 items-center justify-center rounded-lg border transition-all ring-1 ring-inset disabled:cursor-not-allowed disabled:opacity-50 ${
+            className={`inline-flex items-center gap-1.5 rounded-lg border px-3 py-3 text-sm transition-all ring-1 ring-inset disabled:cursor-not-allowed disabled:opacity-50 ${
               active
                 ? opt.activeClass
-                : "border-transparent text-gray-400 hover:bg-gray-100 dark:hover:bg-gray-800"
+                : "border-transparent text-gray-500 hover:bg-gray-100 dark:text-gray-400 dark:hover:bg-gray-800"
             }`}
           >
             <Icon className="size-4 shrink-0" aria-hidden />
+            <span className="font-medium leading-tight">{opt.label}</span>
           </button>
         );
       })}

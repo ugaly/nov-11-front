@@ -44,6 +44,21 @@ const navItems: NavItem[] = [
     name: "Invoices",
     path: "/invoices",
   },
+  {
+    icon: <TableIcon />,
+    name: "Payments",
+    path: "/payments",
+  },
+  {
+    icon: <PieChartIcon />,
+    name: "Expenses",
+    path: "/expenses",
+  },
+  {
+    icon: <ListIcon />,
+    name: "Mail",
+    path: "/mail",
+  },
   // {
   //   icon: <CalenderIcon />,
   //   name: "Calendar",

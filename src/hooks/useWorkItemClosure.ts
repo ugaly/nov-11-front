@@ -42,10 +42,20 @@ export function useWorkItemClosure(
   const [error, setError] = useState<string | null>(null);
 
   useEffect(() => {
-    setClosure({
-      remark: options.initialClosure?.remark ?? "",
-      submittedAt: options.initialClosure?.submittedAt ?? null,
-      submittedStatus: options.initialClosure?.status ?? null,
+    setClosure((prev) => {
+      const submittedAt =
+        options.initialClosure?.submittedAt ?? prev.submittedAt;
+      const fromServer = options.initialClosure?.remark;
+      const remark =
+        submittedAt != null
+          ? (fromServer ?? prev.remark ?? "")
+          : (fromServer ?? prev.remark ?? "");
+      return {
+        remark,
+        submittedAt,
+        submittedStatus:
+          options.initialClosure?.status ?? prev.submittedStatus,
+      };
     });
     setHydrated(true);
   }, [
@@ -67,7 +77,7 @@ export function useWorkItemClosure(
     closure.submittedStatus === currentStatus;
 
   useEffect(() => {
-    if (!hydrated || !isSubmitted) return;
+    if (!hydrated || !isSubmitted || closure.submittedAt) return;
     if (
       !isClosureStatus(currentStatus) ||
       closure.submittedStatus !== currentStatus
@@ -78,7 +88,13 @@ export function useWorkItemClosure(
         submittedStatus: null,
       });
     }
-  }, [currentStatus, closure.submittedStatus, hydrated, isSubmitted]);
+  }, [
+    currentStatus,
+    closure.submittedAt,
+    closure.submittedStatus,
+    hydrated,
+    isSubmitted,
+  ]);
 
   const setRemark = useCallback((remark: string) => {
     setClosure((c) => ({ ...c, remark }));
@@ -105,8 +121,9 @@ export function useWorkItemClosure(
             outputFileIds,
           }
         );
+        const trimmed = remark.trim();
         setClosure({
-          remark: res.remark ?? remark.trim(),
+          remark: res.remark ?? trimmed,
           submittedAt: res.submittedAt,
           submittedStatus: res.status ?? status,
         });

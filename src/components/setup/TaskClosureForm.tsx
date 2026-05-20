@@ -4,8 +4,10 @@ import type {
   WorkItemFieldDefinition,
   WorkItemFieldValue,
 } from "@/api/types/work-item-template";
+import ClosureOutputFilesField from "@/components/setup/ClosureOutputFilesField";
 import TaskFieldForm from "@/components/setup/TaskFieldForm";
 import { statusLabel } from "@/components/setup/TaskStatusPicker";
+import type { WorkItemFileAttachment } from "@/api/types/work-item-template";
 import type { ClosureStatus } from "@/lib/work-item-closure-store";
 import Button from "@/components/ui/button/Button";
 import Label from "@/components/form/Label";
@@ -26,6 +28,12 @@ export default function TaskClosureForm({
   formLinkUrl,
   onUploadFieldFile,
   responsesLocked,
+  outputFiles,
+  outputFilesLoading,
+  outputFilesUploading,
+  outputFilesError,
+  onUploadOutputFile,
+  onRemoveOutputFile,
 }: {
   status: ClosureStatus;
   fields: WorkItemFieldDefinition[];
@@ -35,15 +43,21 @@ export default function TaskClosureForm({
   remark: string;
   isConfigured: boolean;
   onRemarkChange: (remark: string) => void;
-  onSaveValues: (values: WorkItemFieldValue[]) => void;
-  onSubmit: (values: WorkItemFieldValue[], remark: string) => void;
+  onSaveValues: (values: WorkItemFieldValue[]) => void | Promise<void>;
+  onSubmit: (values: WorkItemFieldValue[], remark: string) => void | Promise<void>;
   onEditFields?: () => void;
   formLinkUrl?: string | null;
   onUploadFieldFile?: (
     fieldId: string,
     file: File
-  ) => Promise<import("@/api/types/work-item-template").WorkItemFileAttachment>;
+  ) => Promise<WorkItemFileAttachment>;
   responsesLocked?: boolean;
+  outputFiles?: WorkItemFileAttachment[];
+  outputFilesLoading?: boolean;
+  outputFilesUploading?: boolean;
+  outputFilesError?: string | null;
+  onUploadOutputFile?: (file: File) => Promise<void>;
+  onRemoveOutputFile?: (fileId: string) => Promise<void>;
 }) {
   const [draftRemark, setDraftRemark] = useState(remark);
   const [submitting, setSubmitting] = useState(false);
@@ -53,14 +67,16 @@ export default function TaskClosureForm({
     setDraftRemark(remark);
   }, [remark]);
 
-  function handleSubmit(e: React.FormEvent) {
+  async function handleSubmit(e: React.FormEvent) {
     e.preventDefault();
     setSubmitting(true);
-    const nextValues = getValuesRef.current();
-    onSaveValues(nextValues);
-    onRemarkChange(draftRemark);
-    onSubmit(nextValues, draftRemark);
-    setSubmitting(false);
+    try {
+      const nextValues = getValuesRef.current();
+      onRemarkChange(draftRemark);
+      await onSubmit(nextValues, draftRemark);
+    } finally {
+      setSubmitting(false);
+    }
   }
 
   return (
@@ -107,13 +123,30 @@ export default function TaskClosureForm({
           rows={3}
           value={draftRemark}
           onChange={(e) => setDraftRemark(e.target.value)}
+          disabled={responsesLocked}
           placeholder={`Why is this task ${statusLabel(status).toLowerCase()}?`}
           className="mt-1.5 w-full rounded-lg border border-gray-300 bg-white px-3 py-2 text-sm shadow-theme-xs focus:border-brand-300 focus:outline-none focus:ring-2 focus:ring-brand-500/20 dark:border-gray-700 dark:bg-gray-900 dark:text-white/90"
         />
         <p className="mt-1 text-xs text-gray-500">
-          Shown in the summary table after submit (no input fields).
+          Stored as the closure note (`remark` on POST /closure).
         </p>
       </div>
+
+      <ClosureOutputFilesField
+        files={outputFiles ?? []}
+        readOnly={responsesLocked}
+        loading={outputFilesLoading}
+        uploading={outputFilesUploading}
+        error={outputFilesError}
+        onUpload={
+          onUploadOutputFile
+            ? async (file) => {
+                await onUploadOutputFile(file);
+              }
+            : undefined
+        }
+        onRemove={onRemoveOutputFile}
+      />
 
       <div className="flex flex-wrap items-center gap-2 border-t border-gray-200 pt-3 dark:border-gray-700">
         <Button type="submit" size="sm" disabled={submitting}>
