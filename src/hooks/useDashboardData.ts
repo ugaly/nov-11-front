@@ -1,11 +1,12 @@
 "use client";
 
-import { listDepartments } from "@/api/organization/organization.api";
 import {
   listCustomersPaginated,
   listEngagements,
   listServiceCategories,
 } from "@/api/template-config/template-config.api";
+import { DUMMY_INVOICES } from "@/lib/invoices/invoice-dummy-data";
+import { dashboardInvoiceCounts } from "@/lib/invoices/invoice-utils";
 import type { CustomerEngagementResponse } from "@/api/types/template-config";
 import type { DashboardPeriod } from "@/lib/dashboard-period";
 import {
@@ -16,16 +17,14 @@ import {
   monthKey,
 } from "@/lib/dashboard-period";
 import { getDummyCategorySeries } from "@/lib/dashboard-dummy-data";
-import { getAccessToken } from "@/lib/auth-storage";
 import { useCallback, useEffect, useMemo, useState } from "react";
 
 export type DashboardStats = {
   totalCustomers: number;
   activeCustomers: number;
   inactiveCustomers: number;
-  departmentCount: number;
-  /** Billing API not wired yet — shown as 0 until endpoint exists. */
   unpaidInvoices: number;
+  paidInvoices: number;
   invoicesDueSoon: number;
   engagementsInPeriod: number;
 };
@@ -52,8 +51,8 @@ const emptyStats = (): DashboardStats => ({
   totalCustomers: 0,
   activeCustomers: 0,
   inactiveCustomers: 0,
-  departmentCount: 0,
   unpaidInvoices: 0,
+  paidInvoices: 0,
   invoicesDueSoon: 0,
   engagementsInPeriod: 0,
 });
@@ -145,8 +144,12 @@ export function useDashboardData(
   const [totalCustomers, setTotalCustomers] = useState(0);
   const [activeCustomers, setActiveCustomers] = useState(0);
   const [inactiveCustomers, setInactiveCustomers] = useState(0);
-  const [departmentCount, setDepartmentCount] = useState(0);
   const [engagements, setEngagements] = useState<CustomerEngagementResponse[]>(
+    []
+  );
+
+  const invoiceCounts = useMemo(
+    () => dashboardInvoiceCounts(DUMMY_INVOICES),
     []
   );
 
@@ -155,13 +158,9 @@ export function useDashboardData(
     setLoading(true);
     setError(null);
     try {
-      const token = getAccessToken();
-      const [customerPage, engagementList, departments] = await Promise.all([
+      const [customerPage, engagementList] = await Promise.all([
         listCustomersPaginated(companyId, { page: 0, size: 200 }),
         listEngagements(companyId),
-        token
-          ? listDepartments(token, companyId).catch(() => [])
-          : Promise.resolve([]),
       ]);
 
       setTotalCustomers(customerPage.totalElements);
@@ -178,7 +177,6 @@ export function useDashboardData(
         );
       }
 
-      setDepartmentCount(departments.filter((d) => d.active).length);
       setEngagements(engagementList);
       await listServiceCategories(companyId).catch(() => undefined);
     } catch {
@@ -200,16 +198,16 @@ export function useDashboardData(
       totalCustomers,
       activeCustomers,
       inactiveCustomers,
-      departmentCount,
-      unpaidInvoices: 0,
-      invoicesDueSoon: 0,
+      unpaidInvoices: invoiceCounts.unpaidInvoices,
+      paidInvoices: invoiceCounts.paidInvoices,
+      invoicesDueSoon: invoiceCounts.invoicesDueSoon,
       engagementsInPeriod,
     };
   }, [
     totalCustomers,
     activeCustomers,
     inactiveCustomers,
-    departmentCount,
+    invoiceCounts,
     engagements,
     period,
   ]);

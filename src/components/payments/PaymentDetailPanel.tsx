@@ -220,7 +220,11 @@ export default function PaymentDetailPanel({ paymentId }: { paymentId: string })
           <p className="mb-2 mt-4 text-xs font-medium uppercase tracking-wide text-gray-500">
             Reminders
           </p>
-          <ReminderList reminders={p.reminders} />
+          <ReminderList
+            reminders={p.reminders}
+            referenceDate={p.dueAt}
+            referenceKind="due"
+          />
         </SetupSectionCard>
       </div>
 

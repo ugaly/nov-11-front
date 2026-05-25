@@ -1,9 +1,21 @@
 "use client";
 
-import { formatReminderDateTime, type ReminderEntry } from "@/lib/reminders/reminder-types";
+import {
+  formatReminderSummary,
+  type ReminderEntry,
+  type ReminderReferenceKind,
+} from "@/lib/reminders/reminder-types";
 import { Bell } from "lucide-react";
 
-export default function ReminderList({ reminders }: { reminders?: ReminderEntry[] }) {
+export default function ReminderList({
+  reminders,
+  referenceDate,
+  referenceKind = "due",
+}: {
+  reminders?: ReminderEntry[];
+  referenceDate?: string;
+  referenceKind?: ReminderReferenceKind;
+}) {
   if (!reminders?.length) {
     return <p className="text-sm text-gray-500">No reminders set.</p>;
   }
@@ -18,7 +30,7 @@ export default function ReminderList({ reminders }: { reminders?: ReminderEntry[
           <Bell className="mt-0.5 size-4 shrink-0 text-amber-600" aria-hidden />
           <div className="min-w-0">
             <p className="font-medium text-gray-900 dark:text-white">
-              {formatReminderDateTime(r.at)}
+              {formatReminderSummary(r, referenceDate, referenceKind)}
             </p>
             {r.note ? (
               <p className="text-xs text-gray-500 dark:text-gray-400">{r.note}</p>

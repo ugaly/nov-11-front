@@ -365,7 +365,7 @@ export default function ProfileAccount() {
               title="Change profile photo"
             >
               <UserAvatar
-                fullName={user.fullName}
+                fullName={user.fullName ?? user.username}
                 avatarUrl={user.avatarUrl}
                 sizeClass="h-20 w-20"
                 textClass="text-lg"

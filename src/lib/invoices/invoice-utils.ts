@@ -143,6 +143,25 @@ export function filterInvoices(
   return list;
 }
 
+export function dashboardInvoiceCounts(items: InvoiceRecord[]) {
+  const withStatus = items.map((inv) => ({
+    ...inv,
+    status: computeDisplayStatus(inv),
+  }));
+
+  return {
+    paidInvoices: withStatus.filter((i) => i.status === "PAID").length,
+    unpaidInvoices: withStatus.filter(
+      (i) =>
+        i.status !== "PAID" &&
+        i.status !== "CANCELLED" &&
+        i.status !== "DRAFT"
+    ).length,
+    invoicesDueSoon: withStatus.filter((i) => i.status === "DUE_7_DAYS")
+      .length,
+  };
+}
+
 export function invoiceListStats(items: InvoiceRecord[]) {
   const withStatus = items.map((inv) => ({
     ...inv,

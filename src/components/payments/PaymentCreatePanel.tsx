@@ -279,7 +279,12 @@ export default function PaymentCreatePanel() {
               </div>
             ) : null}
 
-            <ReminderFields value={reminders} onChange={setReminders} />
+            <ReminderFields
+              value={reminders}
+              onChange={setReminders}
+              referenceDate={dueAt}
+              referenceKind="due"
+            />
 
             <div>
               <Label>Reference attachment</Label>

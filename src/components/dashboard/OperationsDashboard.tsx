@@ -5,16 +5,20 @@ import DashboardStatCard from "@/components/dashboard/DashboardStatCard";
 import CategoryPerformanceChart from "@/components/dashboard/CategoryPerformanceChart";
 import DashboardTablesSection from "@/components/dashboard/DashboardTablesSection";
 import DashboardVisualizations from "@/components/dashboard/DashboardVisualizations";
-import { SetupAvatar } from "@/components/setup/setup-pro-ui";
+import UserAvatar from "@/components/common/UserAvatar";
 import { useCompanyContext } from "@/hooks/useCompanyContext";
 import { useDashboardData } from "@/hooks/useDashboardData";
+import {
+  AUTH_USER_CHANGED_EVENT,
+  getStoredUser,
+} from "@/lib/auth-storage";
+import type { UserResponse } from "@/api/types/auth";
 import {
   DASHBOARD_PERIOD_LABELS,
   type DashboardPeriod,
 } from "@/lib/dashboard-period";
-import { getStoredUser } from "@/lib/auth-storage";
 import {
-  Building2,
+  CheckCircle2,
   Clock,
   Loader2,
   Receipt,
@@ -23,7 +27,7 @@ import {
   Users,
   UserX,
 } from "lucide-react";
-import { useEffect, useState } from "react";
+import { useCallback, useEffect, useState } from "react";
 
 const PERIODS: DashboardPeriod[] = ["today", "week", "month"];
 
@@ -33,7 +37,19 @@ export default function OperationsDashboard() {
   const [period, setPeriod] = useState<DashboardPeriod>("today");
   const [now, setNow] = useState("");
 
-  const user = getStoredUser();
+  const [user, setUser] = useState<UserResponse | null>(() => getStoredUser());
+
+  const refreshUser = useCallback(() => {
+    setUser(getStoredUser());
+  }, []);
+
+  useEffect(() => {
+    refreshUser();
+    window.addEventListener(AUTH_USER_CHANGED_EVENT, refreshUser);
+    return () =>
+      window.removeEventListener(AUTH_USER_CHANGED_EVENT, refreshUser);
+  }, [refreshUser]);
+
   const displayName = user?.fullName?.trim() || user?.username || "User";
   const roleLabel =
     user?.profile?.jobTitle?.trim() ||
@@ -94,20 +110,14 @@ export default function OperationsDashboard() {
       <div className="overflow-hidden rounded-2xl bg-[#111111] text-white shadow-lg ring-1 ring-black/10">
         <div className="flex flex-col gap-6 p-6 sm:flex-row sm:items-center sm:justify-between sm:p-8">
           <div className="flex min-w-0 items-center gap-4 sm:gap-5">
-            <div className="relative shrink-0">
-              {user?.avatarUrl ? (
-                <img
-                  src={user.avatarUrl}
-                  alt=""
-                  className="size-16 rounded-2xl object-cover ring-2 ring-white/20 sm:size-[4.5rem]"
-                  width={72}
-                  height={72}
-                />
-              ) : (
-                <span className="block rounded-2xl ring-2 ring-white/20">
-                  <SetupAvatar name={displayName} size="lg" />
-                </span>
-              )}
+            <div className="relative shrink-0 ring-2 ring-white/20 rounded-2xl">
+              <UserAvatar
+                fullName={user?.fullName ?? user?.username}
+                avatarUrl={user?.avatarUrl}
+                sizeClass="size-16 sm:size-[4.5rem]"
+                textClass="text-xl sm:text-2xl"
+                shape="rounded"
+              />
             </div>
             <div className="min-w-0">
               <p className="text-xs font-medium uppercase tracking-wider text-white/50">
@@ -208,16 +218,16 @@ export default function OperationsDashboard() {
           hint="Awaiting payment"
         />
         <DashboardStatCard
+          icon={CheckCircle2}
+          label="Paid invoices"
+          value={loading ? "—" : stats.paidInvoices.toLocaleString()}
+          hint="Settled in full"
+        />
+        <DashboardStatCard
           icon={Clock}
           label="Due within 7 days"
           value={loading ? "—" : stats.invoicesDueSoon.toLocaleString()}
           hint="Invoices nearing due date"
-        />
-        <DashboardStatCard
-          icon={Building2}
-          label="Departments"
-          value={loading ? "—" : stats.departmentCount.toLocaleString()}
-          hint="Active departments"
         />
       </div>
 

@@ -41,7 +41,7 @@ export const DUMMY_PAYMENTS_SEED: PaymentRecord[] = [
     reminders: [
       {
         id: "rem-seed-1",
-        at: `${daysFromNow(3)} 09:00`,
+        schedule: "ONE_WEEK_BEFORE",
         note: "Confirm TRA acknowledgement letter",
       },
     ],
@@ -78,12 +78,12 @@ export const DUMMY_PAYMENTS_SEED: PaymentRecord[] = [
     reminders: [
       {
         id: "rem-seed-2",
-        at: `${daysFromNow(5)} 14:30`,
+        schedule: "ON_REFERENCE_DATE",
         note: "Pay before utility disconnect",
       },
       {
         id: "rem-seed-3",
-        at: `${daysFromNow(1)} 08:00`,
+        schedule: "TWO_WEEKS_BEFORE",
         note: "Finance approval follow-up",
       },
     ],

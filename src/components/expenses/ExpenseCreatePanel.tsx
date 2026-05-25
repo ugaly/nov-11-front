@@ -227,7 +227,12 @@ export default function ExpenseCreatePanel() {
                 <option value="PAID">Paid</option>
               </select>
             </div>
-            <ReminderFields value={reminders} onChange={setReminders} />
+            <ReminderFields
+              value={reminders}
+              onChange={setReminders}
+              referenceDate={expenseDate}
+              referenceKind="expense"
+            />
 
             <div>
               <Label>Receipt</Label>

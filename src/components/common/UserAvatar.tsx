@@ -1,6 +1,7 @@
 "use client";
 
 import { API_BASE_URL } from "@/api/config";
+import { useEffect, useState } from "react";
 
 /** Absolute URL for `<img src>` — API may return absolute, site-relative, or API-root-relative paths. */
 export function resolveAvatarSrc(
@@ -13,17 +14,28 @@ export function resolveAvatarSrc(
   return u;
 }
 
-export function initialsFromFullName(name: string | null | undefined): string {
+/** First letter of the display name (fallback when no photo). */
+export function firstLetterFromName(name: string | null | undefined): string {
   const n = name?.trim();
   if (!n) return "?";
-  const parts = n.split(/\s+/).filter(Boolean);
-  if (parts.length >= 2) {
-    const a = parts[0][0];
-    const b = parts[parts.length - 1][0];
-    return `${a}${b}`.toUpperCase();
+  return n[0]!.toUpperCase();
+}
+
+const AVATAR_PALETTES = [
+  "bg-brand-500 text-white",
+  "bg-violet-500 text-white",
+  "bg-emerald-500 text-white",
+  "bg-amber-500 text-white",
+  "bg-rose-500 text-white",
+  "bg-cyan-600 text-white",
+] as const;
+
+function avatarPalette(name: string): string {
+  let hash = 0;
+  for (let i = 0; i < name.length; i++) {
+    hash = name.charCodeAt(i) + ((hash << 5) - hash);
   }
-  if (parts[0].length >= 2) return parts[0].slice(0, 2).toUpperCase();
-  return parts[0][0]!.toUpperCase();
+  return AVATAR_PALETTES[Math.abs(hash) % AVATAR_PALETTES.length]!;
 }
 
 export type UserAvatarProps = {
@@ -32,6 +44,8 @@ export type UserAvatarProps = {
   sizeClass?: string;
   textClass?: string;
   className?: string;
+  /** `circle` for header; `rounded` for dashboard hero. */
+  shape?: "circle" | "rounded";
 };
 
 export default function UserAvatar({
@@ -40,25 +54,38 @@ export default function UserAvatar({
   sizeClass = "h-11 w-11",
   textClass = "text-sm",
   className = "",
+  shape = "circle",
 }: UserAvatarProps) {
+  const displayName = fullName?.trim() || "User";
   const src = resolveAvatarSrc(avatarUrl);
-  if (src) {
+  const [imgFailed, setImgFailed] = useState(false);
+
+  useEffect(() => {
+    setImgFailed(false);
+  }, [src]);
+
+  const radius = shape === "rounded" ? "rounded-2xl" : "rounded-full";
+  const letter = firstLetterFromName(displayName);
+
+  if (src && !imgFailed) {
     return (
       // eslint-disable-next-line @next/next/no-img-element -- dynamic API URLs
       <img
         src={src}
         alt=""
-        className={`rounded-full object-cover ${sizeClass} ${className}`}
+        className={`object-cover ${radius} ${sizeClass} ${className}`}
+        onError={() => setImgFailed(true)}
       />
     );
   }
-  const ini = initialsFromFullName(fullName);
+
   return (
     <div
-      className={`flex shrink-0 items-center justify-center rounded-full bg-gradient-to-br from-gray-200 to-gray-300 font-semibold text-gray-700 dark:from-gray-600 dark:to-gray-700 dark:text-gray-100 ${sizeClass} ${textClass} ${className}`}
+      className={`flex shrink-0 items-center justify-center font-semibold ${radius} ${avatarPalette(displayName)} ${sizeClass} ${textClass} ${className}`}
       aria-hidden
+      title={displayName}
     >
-      {ini}
+      {letter}
     </div>
   );
 }

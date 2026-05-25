@@ -59,7 +59,7 @@ export default function UserDropdown() {
       >
         <span className="mr-3 h-11 w-11 shrink-0 overflow-hidden rounded-full ring-1 ring-gray-200 dark:ring-gray-700">
           <UserAvatar
-            fullName={sessionUser?.fullName}
+            fullName={sessionUser?.fullName ?? sessionUser?.username}
             avatarUrl={sessionUser?.avatarUrl}
             sizeClass="h-11 w-11"
             textClass="text-sm"

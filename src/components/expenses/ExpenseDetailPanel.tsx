@@ -234,7 +234,11 @@ export default function ExpenseDetailPanel({ expenseId }: { expenseId: string })
           <p className="mb-2 mt-4 text-xs font-medium uppercase tracking-wide text-gray-500">
             Reminders
           </p>
-          <ReminderList reminders={e.reminders} />
+          <ReminderList
+            reminders={e.reminders}
+            referenceDate={e.expenseDate}
+            referenceKind="expense"
+          />
         </SetupSectionCard>
       </div>
 

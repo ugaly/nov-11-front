@@ -6,12 +6,6 @@ function daysAgo(n: number): string {
   return d.toISOString().slice(0, 10);
 }
 
-function daysFromNow(n: number): string {
-  const d = new Date();
-  d.setDate(d.getDate() + n);
-  return d.toISOString().slice(0, 10);
-}
-
 export const DUMMY_EXPENSES_SEED: ExpenseRecord[] = [
   {
     id: "exp-001",
@@ -32,7 +26,7 @@ export const DUMMY_EXPENSES_SEED: ExpenseRecord[] = [
     reminders: [
       {
         id: "rem-exp-1",
-        at: `${daysFromNow(7)} 10:00`,
+        schedule: "ONE_MONTH_BEFORE",
         note: "Attach boarding passes to engagement file",
       },
     ],
@@ -57,7 +51,7 @@ export const DUMMY_EXPENSES_SEED: ExpenseRecord[] = [
     reminders: [
       {
         id: "rem-exp-2",
-        at: `${daysFromNow(2)} 11:00`,
+        schedule: "EVERY_MONTH",
         note: "Process payment before renewal lapses",
       },
     ],
