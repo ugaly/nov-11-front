@@ -9,6 +9,11 @@ import Label from "./Label";
 const inputClassName =
   "h-11 w-full rounded-lg border appearance-none px-4 py-2.5 pr-11 text-sm shadow-theme-xs placeholder:text-gray-400 focus:outline-hidden focus:ring-3 bg-transparent text-gray-800 border-gray-300 focus:border-brand-300 focus:ring-brand-500/20 dark:bg-gray-900 dark:text-white/90 dark:placeholder:text-white/30 dark:border-gray-700 dark:focus:border-brand-800";
 
+function flatpickrAppendTarget(): HTMLElement | undefined {
+  if (typeof document === "undefined") return undefined;
+  return document.body;
+}
+
 type DateTimePickerProps = {
   id?: string;
   label?: string;
@@ -42,8 +47,8 @@ export default function DateTimePicker({
 
     const instance = flatpickr(el, {
       enableTime: true,
-      time_24hr: false,
-      static: true,
+      time_24hr: true,
+      appendTo: flatpickrAppendTarget(),
       monthSelectorType: "static",
       dateFormat: "Y-m-d H:i",
       disableMobile: true,

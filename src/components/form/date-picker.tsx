@@ -12,6 +12,12 @@ type FlatpickrDateOption = flatpickr.Options.DateOption;
 const inputClassName =
   "h-11 w-full rounded-lg border appearance-none px-4 py-2.5 pr-11 text-sm shadow-theme-xs placeholder:text-gray-400 focus:outline-hidden focus:ring-3 bg-transparent text-gray-800 border-gray-300 focus:border-brand-300 focus:ring-brand-500/20 dark:bg-gray-900 dark:text-white/90 dark:placeholder:text-white/30 dark:border-gray-700 dark:focus:border-brand-800";
 
+/** Render calendar on `document.body` so parent cards (`overflow-hidden`) do not clip it. */
+function flatpickrAppendTarget(): HTMLElement | undefined {
+  if (typeof document === "undefined") return undefined;
+  return document.body;
+}
+
 type DatePickerProps = {
   id?: string;
   mode?: "single" | "multiple" | "range" | "time";
@@ -53,7 +59,7 @@ export default function DatePicker({
 
     const instance = flatpickr(el, {
       mode,
-      static: true,
+      appendTo: flatpickrAppendTarget(),
       monthSelectorType: "static",
       dateFormat: "Y-m-d",
       defaultDate: defaultDate ?? (value || undefined),

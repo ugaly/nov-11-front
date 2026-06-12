@@ -5,17 +5,22 @@ import {
   createCatalogNode,
   deleteCatalogNode,
   getServiceCatalog,
+  getTaskDefaultFormTemplate,
+  putTaskDefaultFormTemplate,
 } from "@/api/template-config/template-config.api";
 import type {
   CatalogNodeType,
   ServiceCatalogNodeResponse,
   ServiceCatalogResponse,
 } from "@/api/types/template-config";
+import type { WorkItemFieldDefinition } from "@/api/types/work-item-template";
 import CatalogNodeTableView from "@/components/setup/CatalogNodeTableView";
 import DeactivateConfirmModal from "@/components/setup/DeactivateConfirmModal";
 import ExportListMenu from "@/components/setup/ExportListMenu";
+import FieldBuilderModal from "@/components/setup/FieldBuilderModal";
 import SetupEmptyState from "@/components/setup/SetupEmptyState";
 import PricingFields from "@/components/setup/PricingFields";
+import RecurrenceFields from "@/components/setup/RecurrenceFields";
 import { SetupRowActionDeactivate } from "@/components/setup/SetupRowActions";
 import { setupFormModalClass } from "@/components/setup/setupFormModal";
 import { useCompanyContext } from "@/hooks/useCompanyContext";
@@ -25,7 +30,11 @@ import Input from "@/components/form/input/InputField";
 import Label from "@/components/form/Label";
 import { Modal } from "@/components/ui/modal";
 import { canManageSetup } from "@/lib/is-admin";
-import { formatCatalogRecurrence } from "@/lib/template-recurrence";
+import {
+  emptyRecurrenceForm,
+  formatNodeRecurrence,
+  type RecurrenceFormState,
+} from "@/lib/template-recurrence";
 import { listDepartments } from "@/api/organization/organization.api";
 import type { DepartmentResponse } from "@/api/types/organization";
 import { getAccessToken } from "@/lib/auth-storage";
@@ -67,6 +76,14 @@ export default function CatalogDetailPanel({ catalogId }: { catalogId: string })
     name: string;
   } | null>(null);
   const [deactivating, setDeactivating] = useState(false);
+  const [defaultFormTarget, setDefaultFormTarget] = useState<{
+    nodeId: string;
+    nodeName: string;
+  } | null>(null);
+  const [defaultFields, setDefaultFields] = useState<WorkItemFieldDefinition[]>(
+    []
+  );
+  const [defaultFormLoading, setDefaultFormLoading] = useState(false);
 
   const load = useCallback(async () => {
     if (!companyId) return;
@@ -96,6 +113,21 @@ export default function CatalogDetailPanel({ catalogId }: { catalogId: string })
       alert(getApiErrorMessage(err, "Could not deactivate node."));
     } finally {
       setDeactivating(false);
+    }
+  }
+
+  async function openDefaultFormBuilder(nodeId: string, nodeName: string) {
+    if (!companyId) return;
+    setDefaultFormTarget({ nodeId, nodeName });
+    setDefaultFields([]);
+    setDefaultFormLoading(true);
+    try {
+      const res = await getTaskDefaultFormTemplate(companyId, catalogId, nodeId);
+      setDefaultFields(res.fields ?? []);
+    } catch {
+      setDefaultFields([]);
+    } finally {
+      setDefaultFormLoading(false);
     }
   }
 
@@ -137,7 +169,7 @@ export default function CatalogDetailPanel({ catalogId }: { catalogId: string })
               {catalog.sortOrder}
             </p>
             <p className="mt-1 text-sm text-gray-600 dark:text-gray-400">
-              {formatCatalogRecurrence(catalog)}
+              Recurrence is set on each root GROUP node below.
             </p>
             <p className="mt-1 text-sm text-gray-600 dark:text-gray-400">
               {formatPricing(catalog.pricing)}
@@ -222,6 +254,9 @@ export default function CatalogDetailPanel({ catalogId }: { catalogId: string })
                   companyId={companyId}
                   catalogId={catalogId}
                   onAddChild={(parentId) => setNodeModal({ parentId })}
+                  onConfigureDefaultForm={(nodeId, nodeName) =>
+                    void openDefaultFormBuilder(nodeId, nodeName)
+                  }
                   onRequestDeactivate={(nodeId, name) =>
                     setDeactivateTarget({ nodeId, name })
                   }
@@ -264,6 +299,35 @@ export default function CatalogDetailPanel({ catalogId }: { catalogId: string })
           }}
         />
       ) : null}
+
+      {defaultFormTarget ? (
+        defaultFormLoading ? (
+          <Modal
+            isOpen
+            onClose={() => setDefaultFormTarget(null)}
+            className={setupFormModalClass}
+          >
+            <p className="text-sm text-gray-500">Loading default form…</p>
+          </Modal>
+        ) : (
+          <FieldBuilderModal
+            open
+            onClose={() => setDefaultFormTarget(null)}
+            taskName={`${defaultFormTarget.nodeName} (default form)`}
+            initialFields={defaultFields}
+            onSave={async (fields) => {
+              if (!companyId) return;
+              await putTaskDefaultFormTemplate(
+                companyId,
+                catalogId,
+                defaultFormTarget.nodeId,
+                { fields }
+              );
+              setDefaultFormTarget(null);
+            }}
+          />
+        )
+      ) : null}
     </div>
   );
 }
@@ -299,6 +363,7 @@ function NodeTree({
   companyId,
   catalogId,
   onAddChild,
+  onConfigureDefaultForm,
   onRequestDeactivate,
 }: {
   node: ServiceCatalogNodeResponse;
@@ -307,6 +372,7 @@ function NodeTree({
   companyId: string;
   catalogId: string;
   onAddChild: (parentId: string) => void;
+  onConfigureDefaultForm: (nodeId: string, nodeName: string) => void;
   onRequestDeactivate: (nodeId: string, name: string) => void;
 }) {
   const pad = depth * 16;
@@ -326,6 +392,11 @@ function NodeTree({
         <span className="text-xs text-gray-500">
           {formatPricing(node.pricing)}
         </span>
+        {depth === 0 && node.nodeType === "GROUP" ? (
+          <span className="text-xs text-brand-600 dark:text-brand-400">
+            {formatNodeRecurrence(node)}
+          </span>
+        ) : null}
         {admin ? (
           <span className="ml-auto flex flex-wrap items-center gap-2">
             {node.nodeType === "GROUP" ? (
@@ -338,7 +409,14 @@ function NodeTree({
                 Add child
               </Button>
             ) : (
-              <span className="text-xs text-gray-400">Leaf task</span>
+              <Button
+                type="button"
+                size="sm"
+                variant="outline"
+                onClick={() => onConfigureDefaultForm(node.id, node.name)}
+              >
+                Default form
+              </Button>
             )}
             <SetupRowActionDeactivate
               title="Deactivate node"
@@ -358,6 +436,7 @@ function NodeTree({
               companyId={companyId}
               catalogId={catalogId}
               onAddChild={onAddChild}
+              onConfigureDefaultForm={onConfigureDefaultForm}
               onRequestDeactivate={onRequestDeactivate}
             />
           ))}
@@ -382,7 +461,7 @@ function NodeFormModal({
   onClose: () => void;
   onCreated: () => void;
 }) {
-  const { currencies, timelineUnits } = useTemplateOptions(companyId);
+  const { currencies, timelineUnits, recurrenceTypes } = useTemplateOptions(companyId);
   const [name, setName] = useState("");
   const [description, setDescription] = useState("");
   const [nodeType, setNodeType] = useState<CatalogNodeType>("GROUP");
@@ -391,6 +470,9 @@ function NodeFormModal({
   const [requiresParentCompletion, setRequiresParentCompletion] = useState(false);
   const [departments, setDepartments] = useState<DepartmentResponse[]>([]);
   const [pricing, setPricing] = useState<PricingFormState>(emptyPricingForm);
+  const [recurrence, setRecurrence] = useState<RecurrenceFormState>(
+    emptyRecurrenceForm
+  );
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
@@ -403,6 +485,7 @@ function NodeFormModal({
       setDepartmentId("");
       setRequiresParentCompletion(false);
       setPricing(emptyPricingForm());
+      setRecurrence(emptyRecurrenceForm());
       setError(null);
       return;
     }
@@ -433,6 +516,15 @@ function NodeFormModal({
       setError(pricingError);
       return;
     }
+    if (
+      !parentId &&
+      nodeType === "GROUP" &&
+      recurrence.recurrenceType === "CUSTOM" &&
+      !recurrence.recurrenceIntervalValue.trim()
+    ) {
+      setError("Custom recurrence requires an interval value.");
+      return;
+    }
     const body = buildCreateCatalogNodeRequest({
       parentId,
       name,
@@ -442,6 +534,7 @@ function NodeFormModal({
       departmentId,
       requiresParentCompletion,
       pricing,
+      recurrence,
     });
     setSubmitting(true);
     setError(null);
@@ -541,6 +634,13 @@ function NodeFormModal({
           timelineUnits={timelineUnits}
           variant="duration"
         />
+        {!parentId && nodeType === "GROUP" ? (
+          <RecurrenceFields
+            value={recurrence}
+            onChange={setRecurrence}
+            recurrenceTypes={recurrenceTypes}
+          />
+        ) : null}
         <div className="flex justify-end gap-2">
           <Button type="button" variant="outline" size="sm" onClick={onClose}>
             Cancel

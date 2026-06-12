@@ -4,10 +4,6 @@ import type { Gender, UserResponse } from "./auth";
 export interface CurrentUserResponse extends UserResponse {
   /** Shown read-only; not sent on PATCH. */
   displayName?: string | null;
-  companyId?: string | null;
-  /** Tenant display name from API (not the same as `profile.companyName`). */
-  companyName?: string | null;
-  officeId?: string | null;
   assignedDepartments?: unknown[] | null;
 }
 

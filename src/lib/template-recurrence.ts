@@ -1,11 +1,18 @@
 import type {
   CreateServiceCatalogRequest,
+  CustomerEngagementResponse,
   EngagementPeriodDto,
+  EngagementPeriodInstanceDto,
   RecurrenceInputFields,
   RecurrenceIntervalUnit,
   RecurrenceType,
+  ServiceCatalogNodeResponse,
   ServiceCatalogResponse,
 } from "@/api/types/template-config";
+import {
+  findTopLevelRootForWorkItem,
+  type WorkItemTreeNode,
+} from "@/lib/work-item-tree";
 
 export const DEFAULT_RECURRENCE_TYPES: RecurrenceType[] = [
   "ONE_OFF",
@@ -70,6 +77,130 @@ export function appendRecurrenceFields<T extends RecurrenceInputFields>(
     }
   }
   return body;
+}
+
+export function nodeRecurrenceType(
+  node: Pick<ServiceCatalogNodeResponse, "recurrence">
+): RecurrenceType {
+  return node.recurrence?.recurrenceType ?? "ONE_OFF";
+}
+
+export function isRecurringType(
+  type: RecurrenceType | null | undefined
+): boolean {
+  return type != null && type !== "ONE_OFF";
+}
+
+export function periodsForCatalogRoot(
+  engagement: Pick<CustomerEngagementResponse, "periods">,
+  catalogNodeId: string | null,
+  singleRoot: boolean
+): EngagementPeriodInstanceDto[] {
+  if (!catalogNodeId) return [];
+  return [...(engagement.periods ?? [])]
+    .filter(
+      (p) =>
+        p.catalogNodeId === catalogNodeId ||
+        (!p.catalogNodeId && singleRoot)
+    )
+    .sort((a, b) => a.sortOrder - b.sortOrder);
+}
+
+/** Map the selected period tab to the period id for a task's recurring root (by sort order). */
+export function resolveTaskPeriodId(
+  taskId: string,
+  tree: WorkItemTreeNode[],
+  engagement: CustomerEngagementResponse,
+  activePeriodId: string | null
+): string | null {
+  const topRoot = findTopLevelRootForWorkItem(taskId, tree);
+  if (!topRoot?.catalogNodeId) return null;
+  const rootGroups = tree.filter((n) => n.nodeType === "GROUP");
+  const singleRoot = rootGroups.length === 1;
+  if (
+    !isRecurringWorkRoot(
+      topRoot,
+      engagement,
+      topRoot.catalogNodeId,
+      singleRoot
+    )
+  ) {
+    return null;
+  }
+  const taskPeriods = periodsForCatalogRoot(
+    engagement,
+    topRoot.catalogNodeId,
+    singleRoot
+  );
+  if (taskPeriods.length === 0) return null;
+  if (!activePeriodId) return taskPeriods[0]!.id;
+
+  const allPeriods = [...(engagement.periods ?? [])].sort(
+    (a, b) => a.sortOrder - b.sortOrder
+  );
+  const active = allPeriods.find((p) => p.id === activePeriodId);
+  if (!active) return taskPeriods[0]!.id;
+
+  const activeRootPeriods = periodsForCatalogRoot(
+    engagement,
+    active.catalogNodeId,
+    singleRoot
+  );
+  const idx = activeRootPeriods.findIndex((p) => p.id === activePeriodId);
+  if (idx < 0) return taskPeriods[0]!.id;
+  return taskPeriods[idx]?.id ?? taskPeriods[0]!.id;
+}
+
+/** Detect recurring root from work item, engagement periods, or engagement summary. */
+export function isRecurringWorkRoot(
+  root: { recurrence?: { recurrenceType?: RecurrenceType } | null } | undefined,
+  engagement: {
+    period?: { recurrenceType?: RecurrenceType | null } | null;
+    periods?: { catalogNodeId?: string | null }[] | null;
+  },
+  catalogNodeId: string | null,
+  singleRoot: boolean
+): boolean {
+  if (!root) return false;
+  if (isRecurringType(root.recurrence?.recurrenceType)) return true;
+  if (
+    catalogNodeId &&
+    (engagement.periods ?? []).some((p) => p.catalogNodeId === catalogNodeId)
+  ) {
+    return true;
+  }
+  if (
+    singleRoot &&
+    isRecurringType(engagement.period?.recurrenceType ?? null)
+  ) {
+    return true;
+  }
+  return false;
+}
+
+export function formatNodeRecurrence(
+  node: Pick<ServiceCatalogNodeResponse, "recurrence">
+): string {
+  if (!node.recurrence?.recurrenceType) return "—";
+  const parts: string[] = [RECURRENCE_LABELS[node.recurrence.recurrenceType]];
+  if (
+    node.recurrence.recurrenceType === "CUSTOM" &&
+    node.recurrence.recurrenceIntervalValue != null &&
+    node.recurrence.recurrenceIntervalUnit
+  ) {
+    parts.push(
+      `every ${node.recurrence.recurrenceIntervalValue} ${node.recurrence.recurrenceIntervalUnit}`
+    );
+  }
+  if (node.recurrence.summary) {
+    parts.push(node.recurrence.summary);
+  } else if (node.recurrence.catalogEffectiveFrom) {
+    const range = node.recurrence.catalogEffectiveTo
+      ? `${node.recurrence.catalogEffectiveFrom} → ${node.recurrence.catalogEffectiveTo}`
+      : `from ${node.recurrence.catalogEffectiveFrom}`;
+    parts.push(range);
+  }
+  return parts.join(" · ");
 }
 
 export function formatCatalogRecurrence(

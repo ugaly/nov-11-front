@@ -22,64 +22,119 @@ import {
   TableHeader,
   TableRow,
 } from "@/components/ui/table";
-import { listPayments } from "@/lib/payments/payment-storage";
-import type { PaymentCategory, PaymentListFilters, PaymentStatus } from "@/lib/payments/payment-types";
+import { listOfficePayments } from "@/api/payment/payment.api";
+import type { PaymentWorkflowStatus } from "@/api/types/payment";
+import type { PaymentListFilters, PaymentRecord } from "@/lib/payments/payment-types";
+import { usePaymentAccess } from "@/lib/payments/use-payment-access";
+import { usePaymentOptions } from "@/lib/payments/use-payment-options";
 import {
   filterPayments,
   formatPaymentAmount,
   formatPaymentDate,
-  PAYMENT_CATEGORY_LABELS,
   PAYMENT_STATUS_LABELS,
-  paymentBalance,
   paymentListStats,
 } from "@/lib/payments/payment-utils";
 import {
-  Banknote,
   CheckCircle2,
+  Clock,
   Filter,
   Landmark,
+  Loader2,
+  Paperclip,
   Plus,
   RefreshCw,
   Search,
   Wallet,
 } from "lucide-react";
 import Link from "next/link";
-import { useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 
 const selectClass =
   "h-11 w-full rounded-lg border border-gray-300 bg-transparent px-4 text-sm text-gray-800 shadow-theme-xs dark:border-gray-700 dark:bg-gray-900 dark:text-white/90";
 
-const STATUS_OPTIONS: { value: PaymentStatus | ""; label: string }[] = [
+const STATUS_OPTIONS: { value: PaymentWorkflowStatus | ""; label: string }[] = [
   { value: "", label: "All statuses" },
   ...(
-    Object.entries(PAYMENT_STATUS_LABELS) as [PaymentStatus, string][]
+    Object.entries(PAYMENT_STATUS_LABELS) as [PaymentWorkflowStatus, string][]
   ).map(([value, label]) => ({ value, label })),
 ];
 
 export default function PaymentsPanel() {
+  const { officeId, access, loading: accessLoading, error: accessError } =
+    usePaymentAccess();
+
+  if (accessLoading) {
+    return (
+      <div className="flex min-h-[40vh] items-center justify-center">
+        <Loader2 className="size-8 animate-spin text-gray-400" aria-hidden />
+      </div>
+    );
+  }
+
+  if (!officeId || !access?.visible) {
+    return (
+      <SetupPageShell
+        title="Payments"
+        description="Office payment requests and disbursements."
+      >
+        {() => (
+          <SetupEmptyState
+            icon={Landmark}
+            title="Payments not available"
+            description={
+              accessError ??
+              "You do not have permission to view payments for your office. Ask an administrator to enable payment access in Setup → Payment permissions."
+            }
+          />
+        )}
+      </SetupPageShell>
+    );
+  }
+
   return (
     <SetupPageShell
       title="Payments"
-      description="Record outgoing payments to external entities, attach references, and reconcile against invoices."
+      description="Record outgoing payments for your office, submit for approval, and track settlement."
     >
-      {() => <PaymentList />}
+      {() => <PaymentList officeId={officeId} canCreate={access.canCreate} />}
     </SetupPageShell>
   );
 }
 
-function PaymentList() {
-  const [items, setItems] = useState(() => listPayments());
+function PaymentList({
+  officeId,
+  canCreate,
+}: {
+  officeId: string;
+  canCreate: boolean;
+}) {
+  const [items, setItems] = useState<PaymentRecord[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [loadError, setLoadError] = useState<string | null>(null);
+  const { categories } = usePaymentOptions();
   const [filters, setFilters] = useState<PaymentListFilters>({
     search: "",
     status: "",
-    category: "",
+    categoryId: "",
   });
   const [applied, setApplied] = useState(filters);
   const [showFilters, setShowFilters] = useState(false);
 
+  const refresh = useCallback(async () => {
+    setLoading(true);
+    setLoadError(null);
+    try {
+      setItems(await listOfficePayments(officeId));
+    } catch (e) {
+      setLoadError(e instanceof Error ? e.message : "Could not load payments.");
+    } finally {
+      setLoading(false);
+    }
+  }, [officeId]);
+
   useEffect(() => {
-    setItems(listPayments());
-  }, []);
+    void refresh();
+  }, [refresh]);
 
   const filtered = useMemo(
     () => filterPayments(items, applied),
@@ -87,7 +142,7 @@ function PaymentList() {
   );
   const stats = useMemo(() => paymentListStats(items), [items]);
   const filterCount =
-    (applied.status ? 1 : 0) + (applied.category ? 1 : 0);
+    (applied.status ? 1 : 0) + (applied.categoryId ? 1 : 0);
 
   return (
     <div className="space-y-6">
@@ -96,7 +151,7 @@ function PaymentList() {
           icon={Wallet}
           label="Outstanding"
           value={formatPaymentAmount("TZS", stats.outstandingAmount)}
-          hint={`${stats.unpaid + stats.partial} open`}
+          hint={`${stats.draft + stats.pendingApproval + stats.approved} open`}
           accent="from-gray-900 to-gray-800 text-white"
         />
         <StatMini
@@ -107,20 +162,26 @@ function PaymentList() {
           accent="from-emerald-500 to-emerald-600 text-white"
         />
         <StatMini
-          icon={Banknote}
-          label="Unpaid"
-          value={String(stats.unpaid)}
-          hint="Awaiting disbursement"
-          accent="from-rose-500 to-rose-600 text-white"
+          icon={Clock}
+          label="Pending approval"
+          value={String(stats.pendingApproval)}
+          hint="Awaiting approver"
+          accent="from-amber-500 to-amber-600 text-white"
         />
         <StatMini
           icon={Landmark}
-          label="Partial"
-          value={String(stats.partial)}
-          hint="Instalments in progress"
-          accent="from-amber-500 to-amber-600 text-white"
+          label="Approved"
+          value={String(stats.approved)}
+          hint="Ready to pay"
+          accent="from-blue-500 to-blue-600 text-white"
         />
       </div>
+
+      {loadError ? (
+        <p className="rounded-lg bg-rose-50 px-4 py-2 text-sm text-rose-800 dark:bg-rose-950/30 dark:text-rose-300">
+          {loadError}
+        </p>
+      ) : null}
 
       <div className="rounded-2xl border border-gray-200 bg-gradient-to-br from-white via-white to-gray-50/80 shadow-sm dark:border-gray-800 dark:from-gray-900 dark:via-gray-900 dark:to-gray-950/30">
         <div className="flex flex-wrap items-center justify-between gap-4 border-b border-gray-200/80 px-5 py-4 dark:border-gray-800">
@@ -130,7 +191,7 @@ function PaymentList() {
             </span>
             <div>
               <p className="text-sm font-semibold text-gray-900 dark:text-white">
-                All payments
+                Office payments
               </p>
               <p className="text-xs text-gray-500 dark:text-gray-400">
                 {filtered.length} of {items.length} transactions
@@ -138,6 +199,16 @@ function PaymentList() {
             </div>
           </div>
           <div className="flex flex-wrap items-center gap-2">
+            <Button
+              type="button"
+              variant="outline"
+              size="sm"
+              disabled={loading}
+              onClick={() => void refresh()}
+            >
+              <RefreshCw className="mr-1.5 size-4" aria-hidden />
+              Refresh
+            </Button>
             <Button
               type="button"
               variant="outline"
@@ -152,24 +223,14 @@ function PaymentList() {
                 </span>
               ) : null}
             </Button>
-            <Button
-              type="button"
-              variant="outline"
-              size="sm"
-              onClick={() => {
-                setApplied({ search: "", status: "", category: "" });
-                setFilters({ search: "", status: "", category: "" });
-              }}
-            >
-              <RefreshCw className="mr-1.5 size-4" aria-hidden />
-              Reset
-            </Button>
-            <Link href="/payments/create">
-              <Button size="sm">
-                <Plus className="mr-1.5 size-4" aria-hidden />
-                Record payment
-              </Button>
-            </Link>
+            {canCreate ? (
+              <Link href="/payments/create">
+                <Button size="sm">
+                  <Plus className="mr-1.5 size-4" aria-hidden />
+                  New payment
+                </Button>
+              </Link>
+            ) : null}
           </div>
         </div>
 
@@ -185,14 +246,16 @@ function PaymentList() {
                 onChange={(e) =>
                   setFilters((f) => ({ ...f, search: e.target.value }))
                 }
-                placeholder="Search reference, payee, purpose, reconciliation…"
+                placeholder="Search reference, payee, purpose…"
                 className="pl-10"
               />
             </div>
             <Button
               type="button"
               size="sm"
-              onClick={() => setApplied((prev) => ({ ...prev, search: filters.search }))}
+              onClick={() =>
+                setApplied((prev) => ({ ...prev, search: filters.search }))
+              }
             >
               Search
             </Button>
@@ -208,7 +271,7 @@ function PaymentList() {
                   onChange={(e) =>
                     setApplied((f) => ({
                       ...f,
-                      status: e.target.value as PaymentStatus | "",
+                      status: e.target.value as PaymentWorkflowStatus | "",
                     }))
                   }
                 >
@@ -223,18 +286,18 @@ function PaymentList() {
                 <Label>Category</Label>
                 <select
                   className={`${selectClass} mt-1.5`}
-                  value={applied.category}
+                  value={applied.categoryId}
                   onChange={(e) =>
                     setApplied((f) => ({
                       ...f,
-                      category: e.target.value as PaymentCategory | "",
+                      categoryId: e.target.value,
                     }))
                   }
                 >
                   <option value="">All categories</option>
-                  {Object.entries(PAYMENT_CATEGORY_LABELS).map(([k, label]) => (
-                    <option key={k} value={k}>
-                      {label}
+                  {categories.map((c) => (
+                    <option key={c.id} value={c.id}>
+                      {c.name}
                     </option>
                   ))}
                 </select>
@@ -246,18 +309,24 @@ function PaymentList() {
         <div
           className={`border-t border-gray-100 dark:border-gray-800 ${setupListTableSectionClass}`}
         >
-          {filtered.length === 0 ? (
+          {loading ? (
+            <div className="flex justify-center py-16">
+              <Loader2 className="size-8 animate-spin text-gray-400" aria-hidden />
+            </div>
+          ) : filtered.length === 0 ? (
             <SetupEmptyState
               icon={Landmark}
               title="No payments match"
-              description="Record a payment to an external entity with purpose and reference."
+              description="Create a draft payment for your office."
               action={
-                <Link href="/payments/create">
-                  <Button size="sm">
-                    <Plus className="mr-1.5 size-4" aria-hidden />
-                    Record payment
-                  </Button>
-                </Link>
+                canCreate ? (
+                  <Link href="/payments/create">
+                    <Button size="sm">
+                      <Plus className="mr-1.5 size-4" aria-hidden />
+                      New payment
+                    </Button>
+                  </Link>
+                ) : undefined
               }
             />
           ) : (
@@ -278,64 +347,66 @@ function PaymentList() {
                 </TableRow>
               </TableHeader>
               <TableBody>
-                {filtered.map((p) => {
-                  const balance = paymentBalance(p);
-                  return (
-                    <TableRow key={p.id} className={setupTableRowClass}>
-                      <TableCell className={setupListTdClass}>
+                {filtered.map((p) => (
+                  <TableRow key={p.id} className={setupTableRowClass}>
+                    <TableCell className={setupListTdClass}>
+                      <div className="flex items-start gap-1.5">
                         <Link
                           href={`/payments/${p.id}`}
                           className="font-mono text-xs font-semibold text-brand-600 hover:underline dark:text-brand-400"
                         >
                           {p.referenceNumber}
                         </Link>
-                        <p className="mt-0.5 line-clamp-1 text-[11px] text-gray-500">
-                          {p.purpose}
-                        </p>
-                      </TableCell>
-                      <TableCell className={setupListTdClass}>
-                        <div className="flex items-center gap-2.5">
-                          <SetupAvatar name={p.payeeName} size="xs" />
-                          <div className="min-w-0">
-                            <p className="truncate font-medium text-gray-900 dark:text-white">
-                              {p.payeeName}
-                            </p>
-                            {p.payeeAccount ? (
-                              <p className="truncate text-xs text-gray-500">
-                                {p.payeeAccount}
-                              </p>
-                            ) : null}
-                          </div>
-                        </div>
-                      </TableCell>
-                      <TableCell className={`${setupListTdClass} text-xs`}>
-                        {PAYMENT_CATEGORY_LABELS[p.category]}
-                      </TableCell>
-                      <TableCell className={`${setupListTdClass} font-semibold`}>
-                        {formatPaymentAmount(p.currency, p.amountDue)}
-                        {p.status === "PARTIAL" ? (
-                          <p className="text-[11px] font-normal text-amber-700 dark:text-amber-400">
-                            {formatPaymentAmount(p.currency, balance)} due
-                          </p>
+                        {(p.attachmentCount ?? p.attachments?.length ?? 0) > 0 ? (
+                          <span
+                            className="inline-flex shrink-0 items-center text-gray-400"
+                            title="Has attachment(s)"
+                          >
+                            <Paperclip className="size-3.5" aria-hidden />
+                          </span>
                         ) : null}
-                      </TableCell>
-                      <TableCell className={`${setupListTdClass} text-xs`}>
-                        {formatPaymentDate(p.dueAt)}
-                      </TableCell>
-                      <TableCell className={setupListTdClass}>
-                        <PaymentStatusBadge status={p.status} />
-                      </TableCell>
-                      <TableCell className={setupListTdClass}>
-                        <SetupRowActions>
-                          <SetupRowActionLink
-                            href={`/payments/${p.id}`}
-                            title="View"
-                          />
-                        </SetupRowActions>
-                      </TableCell>
-                    </TableRow>
-                  );
-                })}
+                      </div>
+                      <p className="mt-0.5 line-clamp-1 text-[11px] text-gray-500">
+                        {p.purpose}
+                      </p>
+                    </TableCell>
+                    <TableCell className={setupListTdClass}>
+                      <div className="flex items-center gap-2.5">
+                        <SetupAvatar name={p.payeeName} size="xs" />
+                        <div className="min-w-0">
+                          <p className="truncate font-medium text-gray-900 dark:text-white">
+                            {p.payeeName}
+                          </p>
+                          {p.payeeAccount ? (
+                            <p className="truncate text-xs text-gray-500">
+                              {p.payeeAccount}
+                            </p>
+                          ) : null}
+                        </div>
+                      </div>
+                    </TableCell>
+                    <TableCell className={`${setupListTdClass} text-xs`}>
+                        {p.categoryName}
+                    </TableCell>
+                    <TableCell className={`${setupListTdClass} font-semibold`}>
+                      {formatPaymentAmount(p.currency, Number(p.amountDue))}
+                    </TableCell>
+                    <TableCell className={`${setupListTdClass} text-xs`}>
+                      {formatPaymentDate(p.dueDate)}
+                    </TableCell>
+                    <TableCell className={setupListTdClass}>
+                      <PaymentStatusBadge status={p.status} />
+                    </TableCell>
+                    <TableCell className={setupListTdClass}>
+                      <SetupRowActions>
+                        <SetupRowActionLink
+                          href={`/payments/${p.id}`}
+                          title="View"
+                        />
+                      </SetupRowActions>
+                    </TableCell>
+                  </TableRow>
+                ))}
               </TableBody>
             </Table>
           )}

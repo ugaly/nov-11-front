@@ -10,12 +10,15 @@ export default function ShareFormLinkButton({
   companyId,
   engagementId,
   workItemId,
+  periodId,
   label = "Share form",
   size = "sm",
 }: {
   companyId: string;
   engagementId: string;
   workItemId: string;
+  /** Active recurring period tab — scopes which field templates the link uses. */
+  periodId?: string | null;
   label?: string;
   size?: "sm" | "md";
 }) {
@@ -32,7 +35,10 @@ export default function ShareFormLinkButton({
         companyId,
         engagementId,
         workItemId,
-        { regenerateToken: false }
+        {
+          regenerateToken: false,
+          ...(periodId ? { engagementPeriodId: periodId } : {}),
+        }
       );
       setUrl(link.url);
       await navigator.clipboard.writeText(link.url);

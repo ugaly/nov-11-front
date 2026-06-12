@@ -1,40 +1,13 @@
-import type {
-  PaymentListFilters,
-  PaymentRecord,
-  PaymentStatus,
-} from "@/lib/payments/payment-types";
+import type { PaymentWorkflowStatus } from "@/api/types/payment";
+import type { PaymentListFilters, PaymentRecord } from "@/lib/payments/payment-types";
 
-export const PAYMENT_STATUS_LABELS: Record<PaymentStatus, string> = {
-  UNPAID: "Unpaid",
+export const PAYMENT_STATUS_LABELS: Record<PaymentWorkflowStatus, string> = {
+  DRAFT: "Draft",
+  SUBMITTED_FOR_APPROVAL: "Pending approval",
+  APPROVED: "Approved",
+  PARTIALLY_PAID: "Partially paid",
   PAID: "Paid",
-  PARTIAL: "Partial",
-  SCHEDULED: "Scheduled",
   CANCELLED: "Cancelled",
-};
-
-export const PAYMENT_CATEGORY_LABELS: Record<
-  import("@/lib/payments/payment-types").PaymentCategory,
-  string
-> = {
-  SUPPLIER: "Supplier",
-  TAX: "Tax / statutory",
-  SALARY: "Salary & payroll",
-  UTILITY: "Utility",
-  LOAN: "Loan repayment",
-  RECONCILIATION: "Reconciliation",
-  OTHER: "Other",
-};
-
-export const PAYMENT_METHOD_LABELS: Record<
-  import("@/lib/payments/payment-types").PaymentMethod,
-  string
-> = {
-  BANK_TRANSFER: "Bank transfer",
-  MOBILE_MONEY: "Mobile money",
-  CASH: "Cash",
-  CHEQUE: "Cheque",
-  CARD: "Card",
-  OTHER: "Other",
 };
 
 export function formatPaymentAmount(currency: string, amount: number): string {
@@ -58,18 +31,10 @@ export function formatPaymentDate(iso: string): string {
 }
 
 export function paymentBalance(record: PaymentRecord): number {
-  return Math.max(0, record.amountDue - record.amountPaid);
-}
-
-export function derivePaymentStatus(
-  amountDue: number,
-  amountPaid: number,
-  explicit?: PaymentStatus
-): PaymentStatus {
-  if (explicit === "CANCELLED" || explicit === "SCHEDULED") return explicit;
-  if (amountPaid <= 0) return "UNPAID";
-  if (amountPaid >= amountDue) return "PAID";
-  return "PARTIAL";
+  if (record.amountRemaining != null) {
+    return Math.max(0, Number(record.amountRemaining));
+  }
+  return Math.max(0, Number(record.amountDue) - Number(record.amountPaid));
 }
 
 export function filterPayments(
@@ -79,12 +44,13 @@ export function filterPayments(
   const q = filters.search.trim().toLowerCase();
   return items.filter((p) => {
     if (filters.status && p.status !== filters.status) return false;
-    if (filters.category && p.category !== filters.category) return false;
+    if (filters.categoryId && p.categoryId !== filters.categoryId) return false;
     if (!q) return true;
     return (
       p.referenceNumber.toLowerCase().includes(q) ||
       p.payeeName.toLowerCase().includes(q) ||
       p.purpose.toLowerCase().includes(q) ||
+      p.categoryName.toLowerCase().includes(q) ||
       (p.reconciliationNote ?? "").toLowerCase().includes(q) ||
       (p.linkedInvoiceNumber ?? "").toLowerCase().includes(q)
     );
@@ -92,13 +58,22 @@ export function filterPayments(
 }
 
 export function paymentListStats(items: PaymentRecord[]) {
-  const unpaid = items.filter((p) => p.status === "UNPAID" || p.status === "PARTIAL");
-  const outstanding = unpaid.reduce((s, p) => s + paymentBalance(p), 0);
+  const open = items.filter(
+    (p) =>
+      p.status === "DRAFT" ||
+      p.status === "SUBMITTED_FOR_APPROVAL" ||
+      p.status === "APPROVED" ||
+      p.status === "PARTIALLY_PAID"
+  );
+  const outstanding = open.reduce((s, p) => s + paymentBalance(p), 0);
   return {
     total: items.length,
     paid: items.filter((p) => p.status === "PAID").length,
-    unpaid: items.filter((p) => p.status === "UNPAID").length,
-    partial: items.filter((p) => p.status === "PARTIAL").length,
+    pendingApproval: items.filter((p) => p.status === "SUBMITTED_FOR_APPROVAL")
+      .length,
+    approved: items.filter((p) => p.status === "APPROVED").length,
+    partiallyPaid: items.filter((p) => p.status === "PARTIALLY_PAID").length,
+    draft: items.filter((p) => p.status === "DRAFT").length,
     outstandingAmount: outstanding,
   };
 }

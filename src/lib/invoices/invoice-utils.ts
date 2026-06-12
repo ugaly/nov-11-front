@@ -1,188 +1,121 @@
-import type {
-  InvoiceLineItem,
-  InvoiceListFilters,
-  InvoiceRecord,
-  InvoiceStatus,
-} from "@/lib/invoices/invoice-types";
+import type { InvoiceWorkflowStatus, OfficeInvoiceResponse } from "@/api/types/invoice";
+import type { InvoiceListFilters } from "@/lib/invoices/invoice-types";
 
-export const DEFAULT_VAT_RATE = 0.18;
-
-/** Legacy invoices without vatIncluded show VAT when tax was already applied. */
-export function isVatIncluded(inv: InvoiceRecord): boolean {
-  if (inv.vatIncluded !== undefined) return inv.vatIncluded;
-  return inv.taxAmount > 0;
-}
-
-export function recalculateInvoice<T extends InvoiceRecord>(inv: T): T {
-  const subtotal = inv.lineItems.reduce(
-    (s, l) => s + l.quantity * (Number(l.unitPrice) || 0),
-    0
-  );
-  const included = isVatIncluded(inv);
-  const rate =
-    inv.taxRate > 0 ? inv.taxRate : DEFAULT_VAT_RATE;
-  const taxAmount = included ? Math.round(subtotal * rate) : 0;
-  return {
-    ...inv,
-    subtotal,
-    vatIncluded: included,
-    taxRate: rate,
-    taxAmount,
-    total: subtotal + taxAmount,
-  };
-}
-
-export function newInvoiceLineItem(id?: string): InvoiceLineItem {
-  return {
-    id: id ?? `line-${Date.now()}`,
-    description: "",
-    quantity: 1,
-    unitPrice: 0,
-  };
-}
-
-export const INVOICE_STATUS_LABELS: Record<InvoiceStatus, string> = {
-  PAID: "Paid",
-  UNPAID: "Unpaid",
-  DUE_7_DAYS: "Due in 7 days",
-  DUE_30_DAYS: "Due in 30 days",
-  OVERDUE: "Overdue",
+export const INVOICE_STATUS_LABELS: Record<InvoiceWorkflowStatus, string> = {
   DRAFT: "Draft",
-  CANCELLED: "Cancelled",
-};
-
-export const INVOICE_TYPE_LABELS: Record<string, string> = {
-  SUBSCRIPTION: "Subscription",
-  RENEWAL: "Renewal",
-  UPGRADE: "Upgrade",
-  ONE_TIME: "One-time",
-  MANUAL: "Manual",
+  SENT: "Sent",
+  PARTIALLY_PAID: "Partially paid",
+  PAID: "Paid",
+  VOID: "Void",
 };
 
 export function formatInvoiceAmount(currency: string, amount: number): string {
-  return `${currency} ${amount.toLocaleString(undefined, { maximumFractionDigits: 0 })}`;
+  return `${Math.round(amount).toLocaleString()} ${currency}`;
 }
 
-export function formatInvoiceDate(iso: string): string {
+export function formatInvoiceDate(iso: string | null | undefined): string {
+  if (!iso) return "—";
   try {
-    return new Date(iso).toLocaleDateString(undefined, {
-      day: "numeric",
-      month: "short",
-      year: "numeric",
-    });
+    return new Date(iso.includes("T") ? iso : `${iso}T12:00:00`).toLocaleDateString(
+      undefined,
+      { dateStyle: "medium" }
+    );
   } catch {
     return iso;
   }
 }
 
-export function daysUntilDue(dueAt: string): number {
-  const due = new Date(dueAt);
-  const now = new Date();
-  due.setHours(0, 0, 0, 0);
-  now.setHours(0, 0, 0, 0);
-  return Math.ceil((due.getTime() - now.getTime()) / (1000 * 60 * 60 * 24));
-}
-
-export function computeDisplayStatus(inv: InvoiceRecord): InvoiceStatus {
-  if (inv.status === "PAID" || inv.status === "CANCELLED" || inv.status === "DRAFT") {
-    return inv.status;
-  }
-  const days = daysUntilDue(inv.dueAt);
-  if (days < 0) return "OVERDUE";
-  if (days <= 7) return "DUE_7_DAYS";
-  if (days <= 30) return "DUE_30_DAYS";
-  return inv.status === "OVERDUE" ? "OVERDUE" : "UNPAID";
-}
-
 export function filterInvoices(
-  items: InvoiceRecord[],
+  items: OfficeInvoiceResponse[],
   filters: InvoiceListFilters
-): InvoiceRecord[] {
-  let list = items.map((inv) => ({
-    ...inv,
-    status: computeDisplayStatus(inv),
-  }));
-
+): OfficeInvoiceResponse[] {
   const q = filters.search.trim().toLowerCase();
-  if (q) {
-    list = list.filter(
-      (inv) =>
-        inv.number.toLowerCase().includes(q) ||
-        inv.customerName.toLowerCase().includes(q) ||
-        inv.customerEmail.toLowerCase().includes(q) ||
-        (inv.catalogName?.toLowerCase().includes(q) ?? false)
+  return items.filter((inv) => {
+    if (filters.status && inv.status !== filters.status) return false;
+    if (!q) return true;
+    return (
+      inv.referenceNumber.toLowerCase().includes(q) ||
+      inv.billToName.toLowerCase().includes(q) ||
+      inv.billToEmail.toLowerCase().includes(q) ||
+      (inv.customerName ?? "").toLowerCase().includes(q)
     );
-  }
-
-  if (filters.status) {
-    list = list.filter((inv) => inv.status === filters.status);
-  }
-
-  if (filters.type) {
-    list = list.filter((inv) => inv.type === filters.type);
-  }
-
-  switch (filters.sort) {
-    case "oldest":
-      list.sort((a, b) => a.issuedAt.localeCompare(b.issuedAt));
-      break;
-    case "amount-desc":
-      list.sort((a, b) => b.total - a.total);
-      break;
-    case "amount-asc":
-      list.sort((a, b) => a.total - b.total);
-      break;
-    case "due-soon":
-      list.sort((a, b) => a.dueAt.localeCompare(b.dueAt));
-      break;
-    case "newest":
-    default:
-      list.sort((a, b) => b.issuedAt.localeCompare(a.issuedAt));
-  }
-
-  return list;
+  });
 }
 
-export function dashboardInvoiceCounts(items: InvoiceRecord[]) {
-  const withStatus = items.map((inv) => ({
-    ...inv,
-    status: computeDisplayStatus(inv),
-  }));
-
+export function invoiceListStats(items: OfficeInvoiceResponse[]) {
   return {
-    paidInvoices: withStatus.filter((i) => i.status === "PAID").length,
-    unpaidInvoices: withStatus.filter(
-      (i) =>
-        i.status !== "PAID" &&
-        i.status !== "CANCELLED" &&
-        i.status !== "DRAFT"
-    ).length,
-    invoicesDueSoon: withStatus.filter((i) => i.status === "DUE_7_DAYS")
-      .length,
+    total: items.length,
+    draft: items.filter((i) => i.status === "DRAFT").length,
+    sent: items.filter((i) => i.status === "SENT").length,
+    paid: items.filter((i) => i.status === "PAID").length,
+    partial: items.filter((i) => i.status === "PARTIALLY_PAID").length,
   };
 }
 
-export function invoiceListStats(items: InvoiceRecord[]) {
-  const withStatus = items.map((inv) => ({
-    ...inv,
-    status: computeDisplayStatus(inv),
-  }));
+export function computeLineAmount(qty: number, unit: number): number {
+  return Math.round(qty * unit * 100) / 100;
+}
 
-  const outstanding = withStatus.filter(
-    (i) =>
-      i.status !== "PAID" &&
-      i.status !== "CANCELLED" &&
-      i.status !== "DRAFT"
-  );
+export function computeInvoiceTotals(
+  lines: { quantity: number; unitPrice: number }[],
+  taxRatePercent: number,
+  taxIncluded = false
+) {
+  const lineSum =
+    Math.round(
+      lines.reduce((sum, l) => sum + computeLineAmount(l.quantity, l.unitPrice), 0) * 100
+    ) / 100;
 
-  return {
-    totalCount: items.length,
-    outstandingAmount: outstanding.reduce((s, i) => s + (i.total - i.amountPaid), 0),
-    paidCount: withStatus.filter((i) => i.status === "PAID").length,
-    due7Count: withStatus.filter((i) => i.status === "DUE_7_DAYS").length,
-    due30Count: withStatus.filter(
-      (i) => i.status === "DUE_30_DAYS" || i.status === "UNPAID"
-    ).length,
-    overdueCount: withStatus.filter((i) => i.status === "OVERDUE").length,
-  };
+  if (!taxRatePercent || taxRatePercent <= 0) {
+    return { subtotal: lineSum, taxAmount: 0, totalAmount: lineSum };
+  }
+
+  if (taxIncluded) {
+    const divisor = 1 + taxRatePercent / 100;
+    const subtotal = Math.round((lineSum / divisor) * 100) / 100;
+    const taxAmount = Math.round((lineSum - subtotal) * 100) / 100;
+    return { subtotal, taxAmount, totalAmount: lineSum };
+  }
+
+  const subtotal = lineSum;
+  const taxAmount = Math.round(subtotal * (taxRatePercent / 100) * 100) / 100;
+  const totalAmount = Math.round((subtotal + taxAmount) * 100) / 100;
+  return { subtotal, taxAmount, totalAmount };
+}
+
+export function invoiceBalance(inv: {
+  totalAmount: number;
+  amountPaid?: number;
+  amountRemaining?: number;
+}): number {
+  if (inv.amountRemaining != null) return Math.max(0, Number(inv.amountRemaining));
+  return Math.max(0, Number(inv.totalAmount) - Number(inv.amountPaid ?? 0));
+}
+
+export function dashboardInvoiceCounts(items: OfficeInvoiceResponse[]) {
+  const today = new Date();
+  today.setHours(0, 0, 0, 0);
+  const soon = new Date(today);
+  soon.setDate(soon.getDate() + 7);
+
+  let unpaidInvoices = 0;
+  let paidInvoices = 0;
+  let invoicesDueSoon = 0;
+
+  for (const inv of items) {
+    if (inv.status === "PAID") {
+      paidInvoices++;
+      continue;
+    }
+    if (inv.status === "SENT" || inv.status === "PARTIALLY_PAID") {
+      unpaidInvoices++;
+      const due = new Date(
+        inv.dueDate.includes("T") ? inv.dueDate : `${inv.dueDate}T12:00:00`
+      );
+      due.setHours(0, 0, 0, 0);
+      if (due >= today && due <= soon) invoicesDueSoon++;
+    }
+  }
+
+  return { unpaidInvoices, paidInvoices, invoicesDueSoon };
 }

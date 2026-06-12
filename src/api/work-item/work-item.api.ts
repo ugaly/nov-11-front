@@ -27,13 +27,19 @@ function workItemBase(
   return `/api/companies/${companyId}/engagements/${engagementId}/work-items/${workItemId}`;
 }
 
+function periodParams(periodId?: string | null) {
+  return periodId ? { periodId } : undefined;
+}
+
 export async function getWorkItemExecution(
   companyId: string,
   engagementId: string,
-  workItemId: string
+  workItemId: string,
+  periodId?: string | null
 ): Promise<WorkItemExecutionBundleResponse> {
   const { data } = await apiClient.get<WorkItemExecutionBundleResponse>(
-    `${workItemBase(companyId, engagementId, workItemId)}/execution`
+    `${workItemBase(companyId, engagementId, workItemId)}/execution`,
+    { params: periodParams(periodId) }
   );
   return data;
 }
@@ -41,10 +47,12 @@ export async function getWorkItemExecution(
 export async function getWorkItemFieldTemplate(
   companyId: string,
   engagementId: string,
-  workItemId: string
+  workItemId: string,
+  periodId?: string | null
 ): Promise<WorkItemFieldTemplateResponse> {
   const { data } = await apiClient.get<WorkItemFieldTemplateResponse>(
-    `${workItemBase(companyId, engagementId, workItemId)}/field-template`
+    `${workItemBase(companyId, engagementId, workItemId)}/field-template`,
+    { params: periodParams(periodId) }
   );
   return data;
 }
@@ -53,11 +61,27 @@ export async function putWorkItemFieldTemplate(
   companyId: string,
   engagementId: string,
   workItemId: string,
-  body: PutFieldTemplateRequest
+  body: PutFieldTemplateRequest,
+  periodId?: string | null
 ): Promise<WorkItemFieldTemplateResponse> {
   const { data } = await apiClient.put<WorkItemFieldTemplateResponse>(
     `${workItemBase(companyId, engagementId, workItemId)}/field-template`,
-    body
+    body,
+    { params: periodParams(periodId) }
+  );
+  return data;
+}
+
+export async function postUseDefaultWorkItemFieldTemplate(
+  companyId: string,
+  engagementId: string,
+  workItemId: string,
+  periodId?: string | null
+): Promise<WorkItemFieldTemplateResponse> {
+  const { data } = await apiClient.post<WorkItemFieldTemplateResponse>(
+    `${workItemBase(companyId, engagementId, workItemId)}/field-template/use-default`,
+    undefined,
+    { params: periodParams(periodId) }
   );
   return data;
 }
@@ -65,20 +89,24 @@ export async function putWorkItemFieldTemplate(
 export async function deleteWorkItemFieldTemplate(
   companyId: string,
   engagementId: string,
-  workItemId: string
+  workItemId: string,
+  periodId?: string | null
 ): Promise<void> {
   await apiClient.delete(
-    `${workItemBase(companyId, engagementId, workItemId)}/field-template`
+    `${workItemBase(companyId, engagementId, workItemId)}/field-template`,
+    { params: periodParams(periodId) }
   );
 }
 
 export async function getWorkItemFieldValues(
   companyId: string,
   engagementId: string,
-  workItemId: string
+  workItemId: string,
+  periodId?: string | null
 ): Promise<WorkItemFieldValuesResponse> {
   const { data } = await apiClient.get<WorkItemFieldValuesResponse>(
-    `${workItemBase(companyId, engagementId, workItemId)}/field-values`
+    `${workItemBase(companyId, engagementId, workItemId)}/field-values`,
+    { params: periodParams(periodId) }
   );
   return data;
 }
@@ -87,11 +115,13 @@ export async function putWorkItemFieldValues(
   companyId: string,
   engagementId: string,
   workItemId: string,
-  body: SaveFieldValuesRequest
+  body: SaveFieldValuesRequest,
+  periodId?: string | null
 ): Promise<WorkItemFieldValuesResponse> {
   const { data } = await apiClient.put<WorkItemFieldValuesResponse>(
     `${workItemBase(companyId, engagementId, workItemId)}/field-values`,
-    body
+    body,
+    { params: periodParams(periodId) }
   );
   return data;
 }
@@ -100,11 +130,13 @@ export async function patchWorkItemFieldValues(
   companyId: string,
   engagementId: string,
   workItemId: string,
-  body: SaveFieldValuesRequest
+  body: SaveFieldValuesRequest,
+  periodId?: string | null
 ): Promise<WorkItemFieldValuesResponse> {
   const { data } = await apiClient.patch<WorkItemFieldValuesResponse>(
     `${workItemBase(companyId, engagementId, workItemId)}/field-values`,
-    body
+    body,
+    { params: periodParams(periodId) }
   );
   return data;
 }
@@ -113,21 +145,29 @@ export async function deleteWorkItemFieldValues(
   companyId: string,
   engagementId: string,
   workItemId: string,
-  force = false
+  force = false,
+  periodId?: string | null
 ): Promise<void> {
   await apiClient.delete(
     `${workItemBase(companyId, engagementId, workItemId)}/field-values`,
-    { params: force ? { force: true } : undefined }
+    {
+      params: {
+        ...periodParams(periodId),
+        ...(force ? { force: true } : {}),
+      },
+    }
   );
 }
 
 export async function getWorkItemSubmissionControls(
   companyId: string,
   engagementId: string,
-  workItemId: string
+  workItemId: string,
+  periodId?: string | null
 ): Promise<WorkItemSubmissionControlsResponse> {
   const { data } = await apiClient.get<WorkItemSubmissionControlsResponse>(
-    `${workItemBase(companyId, engagementId, workItemId)}/submission-controls`
+    `${workItemBase(companyId, engagementId, workItemId)}/submission-controls`,
+    { params: periodParams(periodId) }
   );
   return data;
 }
@@ -136,11 +176,13 @@ export async function patchWorkItemSubmissionControls(
   companyId: string,
   engagementId: string,
   workItemId: string,
-  body: PatchWorkItemSubmissionControlsRequest
+  body: PatchWorkItemSubmissionControlsRequest,
+  periodId?: string | null
 ): Promise<WorkItemSubmissionControlsResponse> {
   const { data } = await apiClient.patch<WorkItemSubmissionControlsResponse>(
     `${workItemBase(companyId, engagementId, workItemId)}/submission-controls`,
-    body
+    body,
+    { params: periodParams(periodId) }
   );
   return data;
 }
@@ -161,10 +203,12 @@ export async function patchWorkItemStatus(
 export async function getWorkItemClosure(
   companyId: string,
   engagementId: string,
-  workItemId: string
+  workItemId: string,
+  periodId?: string | null
 ): Promise<WorkItemClosureResponse> {
   const { data } = await apiClient.get<WorkItemClosureResponse>(
-    `${workItemBase(companyId, engagementId, workItemId)}/closure`
+    `${workItemBase(companyId, engagementId, workItemId)}/closure`,
+    { params: periodParams(periodId) }
   );
   return data;
 }
@@ -173,11 +217,13 @@ export async function postWorkItemClosure(
   companyId: string,
   engagementId: string,
   workItemId: string,
-  body: SubmitClosureRequest
+  body: SubmitClosureRequest,
+  periodId?: string | null
 ): Promise<WorkItemClosureResponse> {
   const { data } = await apiClient.post<WorkItemClosureResponse>(
     `${workItemBase(companyId, engagementId, workItemId)}/closure`,
-    body
+    body,
+    { params: periodParams(periodId) }
   );
   return data;
 }
@@ -186,11 +232,13 @@ export async function postWorkItemClosureReopen(
   companyId: string,
   engagementId: string,
   workItemId: string,
-  body: ReopenClosureRequest = {}
+  body: ReopenClosureRequest = {},
+  periodId?: string | null
 ): Promise<WorkItemClosureResponse> {
   const { data } = await apiClient.post<WorkItemClosureResponse>(
     `${workItemBase(companyId, engagementId, workItemId)}/closure/reopen`,
-    body
+    body,
+    { params: periodParams(periodId) }
   );
   return data;
 }
@@ -239,14 +287,15 @@ export async function postWorkItemFieldFile(
   engagementId: string,
   workItemId: string,
   fieldId: string,
-  file: File
+  file: File,
+  periodId?: string | null
 ): Promise<WorkItemFileDto> {
   const form = new FormData();
   form.append("file", file);
   const { data } = await apiClient.post<WorkItemFileDto>(
     `${workItemBase(companyId, engagementId, workItemId)}/field-files`,
     form,
-    { params: { fieldId } }
+    { params: { fieldId, ...periodParams(periodId) } }
   );
   return data;
 }
@@ -255,10 +304,12 @@ export async function deleteWorkItemFieldFile(
   companyId: string,
   engagementId: string,
   workItemId: string,
-  fileId: string
+  fileId: string,
+  periodId?: string | null
 ): Promise<void> {
   await apiClient.delete(
-    `${workItemBase(companyId, engagementId, workItemId)}/field-files/${fileId}`
+    `${workItemBase(companyId, engagementId, workItemId)}/field-files/${fileId}`,
+    { params: periodParams(periodId) }
   );
 }
 

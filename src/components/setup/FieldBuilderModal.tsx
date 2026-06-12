@@ -130,6 +130,10 @@ export default function FieldBuilderModal({
     setDrafts((d) => d.filter((f) => f.id !== id));
   }
 
+  function updateFieldLabel(id: string, label: string) {
+    setDrafts((d) => d.map((f) => (f.id === id ? { ...f, label } : f)));
+  }
+
   async function handleSave() {
     const valid = drafts.filter((d) => d.label.trim());
     if (!valid.length) {
@@ -198,12 +202,12 @@ export default function FieldBuilderModal({
                 aria-hidden
               />
               <div className="min-w-0 flex-1">
-                <p className="truncate text-sm font-medium text-gray-900 dark:text-white">
-                  {f.label}
-                  {f.required ? (
-                    <span className="text-error-500"> *</span>
-                  ) : null}
-                </p>
+                <input
+                  value={f.label}
+                  onChange={(e) => updateFieldLabel(f.id, e.target.value)}
+                  placeholder="Field label"
+                  className="h-8 w-full rounded-md border border-transparent bg-transparent px-2 text-sm font-medium text-gray-900 focus:border-brand-300 focus:bg-white focus:outline-none focus:ring-2 focus:ring-brand-500/20 dark:text-white dark:focus:bg-gray-900"
+                />
                 <p className="text-xs text-gray-500">
                   {BUILDER_WIDGET_OPTIONS.find((w) => w.value === f.widget)
                     ?.label ?? f.widget}

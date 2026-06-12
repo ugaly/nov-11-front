@@ -10,6 +10,7 @@ export default function WorkItemGroupTree({
   onToggleGroup,
   renderTask,
   renderGroupActions,
+  renderBeforeTasks,
 }: {
   sections: WorkGroupSection[];
   /** Controlled expand state (key = group work item id). */
@@ -26,6 +27,8 @@ export default function WorkItemGroupTree({
   ) => ReactNode;
   /** Shown on group header (e.g. share GROUP form link). */
   renderGroupActions?: (section: WorkGroupSection) => ReactNode;
+  /** Rendered inside an expanded group, above its task list (e.g. recurring period tabs). */
+  renderBeforeTasks?: (section: WorkGroupSection) => ReactNode;
 }) {
   function isExpanded(section: WorkGroupSection) {
     if (section.groupNumber === 0) return true;
@@ -110,6 +113,12 @@ export default function WorkItemGroupTree({
               ) : null}
 
               {open ? (
+                <>
+                  {renderBeforeTasks ? (
+                    <div className={!isStandalone ? "mt-2" : ""}>
+                      {renderBeforeTasks(section)}
+                    </div>
+                  ) : null}
                 <ul
                   className={`space-y-3 ${!isStandalone ? "mt-2" : ""}`}
                 >
@@ -154,12 +163,7 @@ export default function WorkItemGroupTree({
                     );
                   })}
                 </ul>
-              ) : !isStandalone ? (
-                <p className="mt-1 pl-6 text-xs text-gray-400">
-                  {section.tasks.length} task
-                  {section.tasks.length === 1 ? "" : "s"} hidden — click to
-                  expand
-                </p>
+                </>
               ) : null}
             </div>
           </div>

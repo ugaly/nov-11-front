@@ -6,6 +6,10 @@ import {
   appendCatalogNodeFields,
   type PricingFormState,
 } from "@/lib/template-pricing";
+import {
+  appendRecurrenceFields,
+  type RecurrenceFormState,
+} from "@/lib/template-recurrence";
 
 export type CatalogNodeFormInput = {
   parentId: string | null;
@@ -16,6 +20,7 @@ export type CatalogNodeFormInput = {
   departmentId: string;
   requiresParentCompletion: boolean;
   pricing: PricingFormState;
+  recurrence: RecurrenceFormState;
 };
 
 /**
@@ -57,5 +62,9 @@ export function buildCreateCatalogNodeRequest(
     body.requiresParentCompletion = true;
   }
 
-  return appendCatalogNodeFields(body, input.pricing);
+  appendCatalogNodeFields(body, input.pricing);
+  if (!input.parentId && input.nodeType === "GROUP") {
+    appendRecurrenceFields(body, input.recurrence);
+  }
+  return body;
 }

@@ -10,6 +10,7 @@ import Input from "@/components/form/input/InputField";
 import Label from "@/components/form/Label";
 import FileAttachmentField from "@/components/setup/FileAttachmentField";
 import type { WorkItemFileAttachment } from "@/api/types/work-item-template";
+import { useToast } from "@/context/ToastContext";
 import { Check, Copy, Link2 } from "lucide-react";
 import { useCallback, useEffect, useState } from "react";
 
@@ -47,10 +48,10 @@ export default function TaskFieldForm({
 }) {
   const [draft, setDraft] = useState<Record<string, WorkItemFieldValue>>({});
   const [saving, setSaving] = useState(false);
-  const [savedFlash, setSavedFlash] = useState(false);
   const [copied, setCopied] = useState(false);
   const [linkUrl, setLinkUrl] = useState<string | null>(formLinkUrl ?? null);
   const [linkLoading, setLinkLoading] = useState(false);
+  const { showError, showSuccess } = useToast();
 
   useEffect(() => {
     setLinkUrl(formLinkUrl ?? null);
@@ -89,8 +90,9 @@ export default function TaskFieldForm({
     try {
       const next = fields.map((f) => draft[f.id] ?? { fieldId: f.id });
       await onSave(next);
-      setSavedFlash(true);
-      window.setTimeout(() => setSavedFlash(false), 2500);
+      showSuccess("Form responses saved");
+    } catch {
+      showError("Failed to save form responses");
     } finally {
       setSaving(false);
     }
@@ -177,9 +179,6 @@ export default function TaskFieldForm({
             <Button type="submit" size="sm" disabled={saving}>
               {saving ? "Saving…" : "Save responses"}
             </Button>
-            {savedFlash ? (
-              <span className="text-sm text-emerald-600">Saved</span>
-            ) : null}
           </div>
         ) : (
           <p className="text-xs text-gray-500">

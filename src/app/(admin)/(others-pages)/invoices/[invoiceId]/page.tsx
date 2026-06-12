@@ -2,12 +2,14 @@ import InvoiceDetailPanel from "@/components/invoices/InvoiceDetailPanel";
 import { Metadata } from "next";
 
 export const metadata: Metadata = {
-  title: "Invoice detail",
+  title: "Invoice",
 };
 
-type Props = { params: Promise<{ invoiceId: string }> };
-
-export default async function InvoiceDetailPage({ params }: Props) {
+export default async function InvoiceDetailPage({
+  params,
+}: {
+  params: Promise<{ invoiceId: string }>;
+}) {
   const { invoiceId } = await params;
   return <InvoiceDetailPanel invoiceId={invoiceId} />;
 }

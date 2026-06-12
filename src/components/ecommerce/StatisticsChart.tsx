@@ -21,7 +21,7 @@ export default function StatisticsChart() {
 
     const fp = flatpickr(datePickerRef.current, {
       mode: "range",
-      static: true,
+      appendTo: document.body,
       monthSelectorType: "static",
       dateFormat: "M d",
       defaultDate: [sevenDaysAgo, today],

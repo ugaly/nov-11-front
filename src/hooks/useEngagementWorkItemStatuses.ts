@@ -27,7 +27,7 @@ export function useEngagementWorkItemStatuses(
 
   const setStatus = useCallback(
     async (workItemId: string, status: WorkItemStatus) => {
-      if (!companyId) return;
+      if (!companyId) return false;
       const previous = optimistic[workItemId];
       setOptimistic((prev) => ({ ...prev, [workItemId]: status }));
       setStatusError(null);
@@ -36,6 +36,7 @@ export function useEngagementWorkItemStatuses(
           status,
         });
         // Keep optimistic status — no full engagement reload (avoids collapsing groups).
+        return true;
       } catch (err) {
         setOptimistic((prev) => {
           const next = { ...prev };
@@ -44,6 +45,7 @@ export function useEngagementWorkItemStatuses(
           return next;
         });
         setStatusError(getApiErrorMessage(err, "Could not update status."));
+        return false;
       }
     },
     [companyId, engagementId]

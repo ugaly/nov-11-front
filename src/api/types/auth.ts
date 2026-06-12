@@ -49,6 +49,10 @@ export interface UserResponse {
   avatarUrl: string | null;
   lastLoginAt: string | null;
   createdAt: string | null;
+  companyId: string | null;
+  companyName: string | null;
+  officeId: string | null;
+  officeName: string | null;
   profile: UserProfileResponse | null;
 }
 

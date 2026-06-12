@@ -1,123 +1,234 @@
 "use client";
 
-import InvoiceDocumentPreview from "@/components/invoices/InvoiceDocumentPreview";
+import {
+  createOfficeInvoice,
+  sendOfficeInvoice,
+} from "@/api/invoice/invoice.api";
+import InvoiceDocumentView, {
+  type InvoiceDocumentData,
+} from "@/components/invoices/InvoiceDocumentView";
+import InvoiceRecipientAutocomplete, {
+  type InvoiceBillTo,
+} from "@/components/invoices/InvoiceRecipientAutocomplete";
+import InvoiceTaxFields from "@/components/invoices/InvoiceTaxFields";
+import ReminderFields from "@/components/shared/ReminderFields";
 import {
   SetupBackLink,
   SetupSectionCard,
 } from "@/components/setup/setup-pro-ui";
-import {
-  invoiceNotesTextareaClass,
-} from "@/components/invoices/invoice-form-styles";
 import Button from "@/components/ui/button/Button";
 import DatePicker from "@/components/form/date-picker";
 import Input from "@/components/form/input/InputField";
 import Label from "@/components/form/Label";
+import { useToast } from "@/context/ToastContext";
 import { useCompanyContext } from "@/hooks/useCompanyContext";
-import {
-  DUMMY_INVOICE_CUSTOMERS,
-  getDummyInvoiceById,
-} from "@/lib/invoices/invoice-dummy-data";
-import InvoiceVatToggle from "@/components/invoices/InvoiceVatToggle";
-import type { InvoiceLineItem, InvoiceRecord, InvoiceType } from "@/lib/invoices/invoice-types";
-import {
-  DEFAULT_VAT_RATE,
-  formatInvoiceAmount,
-  recalculateInvoice,
-} from "@/lib/invoices/invoice-utils";
-import {
-  ChevronLeft,
-  Loader2,
-  Plus,
-  Send,
-  Trash2,
-} from "lucide-react";
+import { useInvoiceAccess } from "@/lib/invoices/use-invoice-access";
+import { computeInvoiceTotals } from "@/lib/invoices/invoice-utils";
+import type { ReminderEntry } from "@/lib/reminders/reminder-types";
+import { sanitizeReminders } from "@/lib/reminders/reminder-types";
+import { ChevronLeft, Eye, Loader2, Plus, Send, Trash2 } from "lucide-react";
+import Link from "next/link";
 import { useRouter, useSearchParams } from "next/navigation";
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 
-const selectClass =
-  "h-11 w-full rounded-lg border border-gray-300 bg-white px-4 text-sm text-gray-800 shadow-theme-xs dark:border-gray-700 dark:bg-gray-900 dark:text-white/90";
+const textareaClass =
+  "min-h-[88px] w-full rounded-lg border border-gray-300 bg-white px-4 py-3 text-sm text-gray-800 shadow-theme-xs dark:border-gray-700 dark:bg-gray-900 dark:text-white/90";
 
-function newLine(id: string): InvoiceLineItem {
-  return { id, description: "", quantity: 1, unitPrice: 0 };
-}
+type LineRow = {
+  id: string;
+  description: string;
+  quantity: string;
+  unitPrice: string;
+};
 
-function buildPreview(
-  customerId: string,
-  lineItems: InvoiceLineItem[],
-  dueAt: string,
-  notes: string,
-  type: InvoiceType,
-  vatIncluded: boolean
-): InvoiceRecord | null {
-  const customer = DUMMY_INVOICE_CUSTOMERS.find((c) => c.id === customerId);
-  if (!customer) return null;
-
-  return recalculateInvoice({
-    id: "preview",
-    number: "INV-DRAFT-NEW",
-    customerId: customer.id,
-    customerName: customer.name,
-    customerEmail: customer.email,
-    type,
-    status: "DRAFT",
-    currency: "TZS",
-    subtotal: 0,
-    vatIncluded,
-    taxRate: DEFAULT_VAT_RATE,
-    taxAmount: 0,
-    total: 0,
-    amountPaid: 0,
-    issuedAt: new Date().toISOString().slice(0, 10),
-    dueAt,
-    lineItems: lineItems.filter((l) => l.description.trim()),
-    notes: notes || undefined,
-    billingAddress: customer.billingAddress,
-    activities: [],
-  });
+function newLine(desc = "", price = ""): LineRow {
+  return {
+    id: crypto.randomUUID(),
+    description: desc,
+    quantity: "1",
+    unitPrice: price,
+  };
 }
 
 export default function InvoiceCreatePanel() {
   const router = useRouter();
   const searchParams = useSearchParams();
-  const fromId = searchParams.get("from");
-  const source = fromId ? getDummyInvoiceById(fromId) : null;
-
+  const toast = useToast();
   const { companyName } = useCompanyContext();
-  const [customerId, setCustomerId] = useState(source?.customerId ?? "");
-  const [type, setType] = useState<InvoiceType>(source?.type ?? "MANUAL");
-  const [dueAt, setDueAt] = useState(() => {
+  const { officeId, access, loading: accessLoading } = useInvoiceAccess();
+
+  const [billTo, setBillTo] = useState<InvoiceBillTo>({
+    billToName: "",
+    billToEmail: "",
+  });
+  const [issueDate, setIssueDate] = useState(() =>
+    new Date().toISOString().slice(0, 10)
+  );
+  const [dueDate, setDueDate] = useState(() => {
     const d = new Date();
     d.setDate(d.getDate() + 30);
     return d.toISOString().slice(0, 10);
   });
-  const [notes, setNotes] = useState(source?.notes ?? "");
-  const [lineItems, setLineItems] = useState<InvoiceLineItem[]>(
-    source?.lineItems.map((l) => ({ ...l, id: `new-${l.id}` })) ?? [
-      newLine("1"),
-      newLine("2"),
+  const [taxEnabled, setTaxEnabled] = useState(true);
+  const [taxIncluded, setTaxIncluded] = useState(false);
+  const [taxRate, setTaxRate] = useState("18");
+  const [reminders, setReminders] = useState<ReminderEntry[]>([]);
+  const [notes, setNotes] = useState("");
+  const [terms, setTerms] = useState("");
+  const [lineItems, setLineItems] = useState<LineRow[]>([newLine(), newLine()]);
+  const [sendAfterCreate, setSendAfterCreate] = useState(false);
+  const [saving, setSaving] = useState(false);
+  const [prefillDone, setPrefillDone] = useState(false);
+
+  useEffect(() => {
+    if (prefillDone) return;
+    const name = searchParams.get("name") ?? "";
+    const email = searchParams.get("email") ?? "";
+    const customerId = searchParams.get("customerId") ?? undefined;
+    const line = searchParams.get("line") ?? "";
+    const amount = searchParams.get("amount") ?? "";
+    const notesParam = searchParams.get("notes") ?? "";
+
+    if (name || email || customerId) {
+      setBillTo({
+        billToName: name,
+        billToEmail: email,
+        customerId: customerId || undefined,
+      });
+    }
+    if (line || amount) {
+      setLineItems([newLine(line, amount), newLine()]);
+    }
+    if (notesParam) setNotes(notesParam);
+    setPrefillDone(true);
+  }, [searchParams, prefillDone]);
+
+  const parsedLines = useMemo(() => {
+    return lineItems
+      .map((l) => ({
+        description: l.description.trim(),
+        quantity: Number(l.quantity.replace(/,/g, "")) || 0,
+        unitPrice: Number(l.unitPrice.replace(/,/g, "")) || 0,
+      }))
+      .filter((l) => l.description && l.quantity > 0 && l.unitPrice >= 0);
+  }, [lineItems]);
+
+  const totals = useMemo(
+    () =>
+      computeInvoiceTotals(
+        parsedLines,
+        taxEnabled ? Number(taxRate) || 0 : 0,
+        taxIncluded
+      ),
+    [parsedLines, taxRate, taxEnabled, taxIncluded]
+  );
+
+  const previewData: InvoiceDocumentData = useMemo(
+    () => ({
+      referenceNumber: "DRAFT-PREVIEW",
+      billToName: billTo.billToName,
+      billToEmail: billTo.billToEmail,
+      issueDate,
+      dueDate,
+      currency: "TZS",
+      lineItems: parsedLines,
+      subtotal: totals.subtotal,
+      taxRate: taxEnabled ? Number(taxRate) || 0 : 0,
+      taxAmount: totals.taxAmount,
+      totalAmount: totals.totalAmount,
+      taxIncluded: taxEnabled && taxIncluded,
+      notes,
+      terms,
+      companyName,
+    }),
+    [
+      billTo,
+      issueDate,
+      dueDate,
+      parsedLines,
+      totals,
+      taxRate,
+      taxEnabled,
+      taxIncluded,
+      notes,
+      terms,
+      companyName,
     ]
   );
-  const [sendAfterCreate, setSendAfterCreate] = useState(true);
-  const [vatIncluded, setVatIncluded] = useState(source?.vatIncluded ?? false);
-  const [saving, setSaving] = useState(false);
 
-  const preview = useMemo(
-    () => buildPreview(customerId, lineItems, dueAt, notes, type, vatIncluded),
-    [customerId, lineItems, dueAt, notes, type, vatIncluded]
-  );
+  if (accessLoading) {
+    return (
+      <div className="flex min-h-[40vh] items-center justify-center">
+        <Loader2 className="size-8 animate-spin text-gray-400" aria-hidden />
+      </div>
+    );
+  }
 
-  function updateLine(id: string, patch: Partial<InvoiceLineItem>) {
-    setLineItems((rows) =>
-      rows.map((r) => (r.id === id ? { ...r, ...patch } : r))
+  if (!officeId || !access?.canCreate) {
+    return (
+      <div className="space-y-4">
+        <SetupBackLink href="/invoices">
+          <ChevronLeft className="size-4" aria-hidden />
+          Back to invoices
+        </SetupBackLink>
+        <p className="text-sm text-gray-500">
+          You do not have permission to create invoices.
+        </p>
+      </div>
     );
   }
 
   async function handleSubmit(send: boolean) {
-    if (!customerId || !preview || preview.lineItems.length === 0) return;
+    if (!billTo.billToName.trim() || !billTo.billToEmail.trim()) {
+      toast.showError("Bill to name and email are required.");
+      return;
+    }
+    if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(billTo.billToEmail.trim())) {
+      toast.showError("Enter a valid bill-to email.");
+      return;
+    }
+    if (parsedLines.length === 0) {
+      toast.showError("Add at least one line item with description, quantity, and price.");
+      return;
+    }
+
     setSaving(true);
-    await new Promise((r) => setTimeout(r, 800));
-    setSaving(false);
-    router.push(send ? "/invoices/inv-002" : "/invoices");
+    try {
+      let invoice = await createOfficeInvoice(officeId!, {
+        customerId: billTo.customerId,
+        billToName: billTo.billToName.trim(),
+        billToEmail: billTo.billToEmail.trim(),
+        issueDate,
+        dueDate,
+        currency: "TZS",
+        taxRate: taxEnabled ? Number(taxRate) || 0 : 0,
+        taxIncluded: taxEnabled && taxIncluded,
+        reminders: sanitizeReminders(reminders).map((r) => ({
+          schedule: r.schedule,
+          customAt: r.at,
+          note: r.note,
+        })),
+        notes: notes.trim() || undefined,
+        terms: terms.trim() || undefined,
+        lineItems: parsedLines,
+      });
+      if (send || sendAfterCreate) {
+        if (!access?.canSend) {
+          toast.showError("Invoice saved as draft. You need Send permission to email it.");
+          router.push(`/invoices/${invoice.id}`);
+          return;
+        }
+        invoice = await sendOfficeInvoice(officeId!, invoice.id);
+        toast.showSuccess("Invoice created and sent by email.");
+      } else {
+        toast.showSuccess("Invoice saved as draft.");
+      }
+      router.push(`/invoices/${invoice.id}`);
+    } catch (e) {
+      toast.showError(e instanceof Error ? e.message : "Could not create invoice.");
+    } finally {
+      setSaving(false);
+    }
   }
 
   return (
@@ -130,65 +241,63 @@ export default function InvoiceCreatePanel() {
         <h1 className="mt-3 text-2xl font-bold text-gray-900 dark:text-white">
           Create invoice
         </h1>
-        <p className="mt-1 max-w-2xl text-sm text-gray-500 dark:text-gray-400">
-          Manual invoices for one-off or custom billing. Most invoices are
-          auto-generated from engagements — use this when you need to bill a
-          customer directly.
+        <p className="mt-1 text-sm text-gray-500 dark:text-gray-400">
+          The preview updates as you type. Sending is handled by the server.
         </p>
       </div>
 
       <div className="grid grid-cols-1 gap-8 xl:grid-cols-12">
         <div className="space-y-6 xl:col-span-7">
-          <SetupSectionCard title="Customer & terms">
+          <SetupSectionCard title="Recipient">
+            <InvoiceRecipientAutocomplete
+              officeId={officeId}
+              value={billTo}
+              onChange={setBillTo}
+              disabled={saving}
+            />
+          </SetupSectionCard>
+
+          <SetupSectionCard title="Dates">
             <div className="grid gap-5 sm:grid-cols-2">
-              <div className="sm:col-span-2">
-                <Label>Customer *</Label>
-                <select
-                  className={`${selectClass} mt-1.5`}
-                  value={customerId}
-                  onChange={(e) => setCustomerId(e.target.value)}
-                >
-                  <option value="">Select customer…</option>
-                  {DUMMY_INVOICE_CUSTOMERS.map((c) => (
-                    <option key={c.id} value={c.id}>
-                      {c.name}
-                    </option>
-                  ))}
-                </select>
-              </div>
-              <div>
-                <Label>Invoice type</Label>
-                <select
-                  className={`${selectClass} mt-1.5`}
-                  value={type}
-                  onChange={(e) => setType(e.target.value as InvoiceType)}
-                >
-                  <option value="MANUAL">Manual</option>
-                  <option value="ONE_TIME">One-time</option>
-                  <option value="SUBSCRIPTION">Subscription</option>
-                  <option value="RENEWAL">Renewal</option>
-                  <option value="UPGRADE">Upgrade</option>
-                </select>
-              </div>
-              <div className="sm:col-span-2 sm:max-w-xs">
-                <DatePicker
-                  id="invoice-create-due"
-                  label="Due date *"
-                  placeholder="Select due date"
-                  value={dueAt}
-                  onValueChange={setDueAt}
-                />
-              </div>
-              <div className="sm:col-span-2">
-                <Label>Notes (optional)</Label>
-                <textarea
-                  value={notes}
-                  onChange={(e) => setNotes(e.target.value)}
-                  className={`${invoiceNotesTextareaClass} mt-1.5`}
-                  placeholder="Payment instructions, bank details, or internal note…"
-                />
-              </div>
+              <DatePicker
+                id="invoice-issue-date"
+                label="Issue date *"
+                value={issueDate}
+                onValueChange={setIssueDate}
+              />
+              <DatePicker
+                id="invoice-due-date"
+                label="Due date *"
+                value={dueDate}
+                onValueChange={setDueDate}
+              />
             </div>
+          </SetupSectionCard>
+
+          <SetupSectionCard title="Tax">
+            <InvoiceTaxFields
+              taxEnabled={taxEnabled}
+              taxIncluded={taxIncluded}
+              taxRate={taxRate}
+              onTaxEnabledChange={setTaxEnabled}
+              onTaxIncludedChange={setTaxIncluded}
+              onTaxRateChange={setTaxRate}
+              lines={parsedLines}
+              disabled={saving}
+            />
+          </SetupSectionCard>
+
+          <SetupSectionCard title="Payment reminders">
+            <p className="mb-3 text-xs text-gray-500">
+              Email the customer again on these schedules while the invoice is unpaid
+              (after you send it).
+            </p>
+            <ReminderFields
+              value={reminders}
+              onChange={setReminders}
+              referenceDate={dueDate}
+              referenceKind="due"
+            />
           </SetupSectionCard>
 
           <SetupSectionCard
@@ -198,9 +307,7 @@ export default function InvoiceCreatePanel() {
                 type="button"
                 size="sm"
                 variant="outline"
-                onClick={() =>
-                  setLineItems((rows) => [...rows, newLine(String(Date.now()))])
-                }
+                onClick={() => setLineItems((rows) => [...rows, newLine()])}
               >
                 <Plus className="mr-1 size-4" aria-hidden />
                 Add line
@@ -208,131 +315,147 @@ export default function InvoiceCreatePanel() {
             }
           >
             <div className="space-y-4">
-              {lineItems.map((line, idx) => (
+              {lineItems.map((row) => (
                 <div
-                  key={line.id}
-                  className="rounded-xl border border-gray-100 bg-gray-50/50 p-4 dark:border-gray-800 dark:bg-gray-900/30"
+                  key={row.id}
+                  className="grid gap-3 rounded-xl border border-gray-100 p-4 dark:border-gray-800 sm:grid-cols-12"
                 >
-                  <div className="mb-3 flex items-center justify-between">
-                    <span className="text-xs font-semibold uppercase text-gray-500">
-                      Line {idx + 1}
-                    </span>
-                    {lineItems.length > 1 ? (
-                      <button
-                        type="button"
-                        className="text-gray-400 hover:text-rose-600"
-                        onClick={() =>
-                          setLineItems((rows) => rows.filter((r) => r.id !== line.id))
-                        }
-                        aria-label="Remove line"
-                      >
-                        <Trash2 className="size-4" />
-                      </button>
-                    ) : null}
+                  <div className="sm:col-span-6">
+                    <Label>Description</Label>
+                    <Input
+                      className="mt-1.5"
+                      value={row.description}
+                      onChange={(e) =>
+                        setLineItems((rows) =>
+                          rows.map((r) =>
+                            r.id === row.id
+                              ? { ...r, description: e.target.value }
+                              : r
+                          )
+                        )
+                      }
+                      placeholder="Service or product"
+                    />
                   </div>
-                  <div className="grid gap-3 sm:grid-cols-12">
-                    <div className="sm:col-span-6">
-                      <Label>Description</Label>
-                      <Input
-                        value={line.description}
-                        onChange={(e) =>
-                          updateLine(line.id, { description: e.target.value })
-                        }
-                        className="mt-1"
-                        placeholder="Service description"
-                      />
-                    </div>
-                    <div className="sm:col-span-2">
-                      <Label>Qty</Label>
-                      <Input
-                        type="number"
-                        min="1"
-                        value={String(line.quantity)}
-                        onChange={(e) =>
-                          updateLine(line.id, {
-                            quantity: Math.max(1, Number(e.target.value) || 1),
-                          })
-                        }
-                        className="mt-1"
-                      />
-                    </div>
-                    <div className="sm:col-span-4">
-                      <Label>Unit price (TZS)</Label>
-                      <Input
-                        type="number"
-                        min="0"
-                        value={line.unitPrice ? String(line.unitPrice) : ""}
-                        onChange={(e) =>
-                          updateLine(line.id, {
-                            unitPrice: Number(e.target.value) || 0,
-                          })
-                        }
-                        className="mt-1"
-                      />
-                    </div>
+                  <div className="sm:col-span-2">
+                    <Label>Qty</Label>
+                    <Input
+                      className="mt-1.5"
+                      value={row.quantity}
+                      onChange={(e) =>
+                        setLineItems((rows) =>
+                          rows.map((r) =>
+                            r.id === row.id ? { ...r, quantity: e.target.value } : r
+                          )
+                        )
+                      }
+                    />
+                  </div>
+                  <div className="sm:col-span-3">
+                    <Label>Unit price</Label>
+                    <Input
+                      className="mt-1.5"
+                      value={row.unitPrice}
+                      onChange={(e) =>
+                        setLineItems((rows) =>
+                          rows.map((r) =>
+                            r.id === row.id
+                              ? { ...r, unitPrice: e.target.value }
+                              : r
+                          )
+                        )
+                      }
+                    />
+                  </div>
+                  <div className="flex items-end sm:col-span-1">
+                    <Button
+                      type="button"
+                      variant="outline"
+                      size="sm"
+                      aria-label="Remove line"
+                      disabled={lineItems.length <= 1}
+                      onClick={() =>
+                        setLineItems((rows) => rows.filter((r) => r.id !== row.id))
+                      }
+                    >
+                      <Trash2 className="size-4" aria-hidden />
+                    </Button>
                   </div>
                 </div>
               ))}
             </div>
           </SetupSectionCard>
 
-          <InvoiceVatToggle checked={vatIncluded} onChange={setVatIncluded} />
+          <SetupSectionCard title="Notes & terms">
+            <div className="space-y-4">
+              <div>
+                <Label>Notes (optional)</Label>
+                <textarea
+                  className={`${textareaClass} mt-1.5`}
+                  value={notes}
+                  onChange={(e) => setNotes(e.target.value)}
+                  placeholder="Payment instructions or bank details…"
+                />
+              </div>
+              <div>
+                <Label>Terms (optional)</Label>
+                <textarea
+                  className={`${textareaClass} mt-1.5`}
+                  value={terms}
+                  onChange={(e) => setTerms(e.target.value)}
+                />
+              </div>
+            </div>
+          </SetupSectionCard>
 
-          <label className="flex items-center gap-2 rounded-xl border border-gray-200 bg-white px-4 py-3 text-sm dark:border-gray-800 dark:bg-gray-900/40">
-            <input
-              type="checkbox"
-              checked={sendAfterCreate}
-              onChange={(e) => setSendAfterCreate(e.target.checked)}
-              className="rounded border-gray-300"
-            />
-            Send invoice to customer by email after saving
-          </label>
-
-          <div className="flex flex-wrap gap-3">
-            <Button
-              type="button"
-              disabled={saving || !preview?.lineItems.length}
-              onClick={() => void handleSubmit(false)}
-            >
-              {saving ? <Loader2 className="mr-1.5 size-4 animate-spin" /> : null}
-              Save as draft
-            </Button>
-            <Button
-              type="button"
-              variant="outline"
-              disabled={saving || !preview?.lineItems.length || !customerId}
-              onClick={() => void handleSubmit(sendAfterCreate)}
-            >
-              <Send className="mr-1.5 size-4" aria-hidden />
-              Save & send
-            </Button>
+          <div className="flex flex-wrap items-center gap-3 border-t border-gray-200 pt-6 dark:border-gray-800">
+            <label className="flex items-center gap-2 text-sm text-gray-600 dark:text-gray-400">
+              <input
+                type="checkbox"
+                checked={sendAfterCreate}
+                onChange={(e) => setSendAfterCreate(e.target.checked)}
+                disabled={!access?.canSend}
+              />
+              Send by email after saving
+            </label>
+            <div className="ml-auto flex flex-wrap gap-2">
+              <Link href="/invoices">
+                <Button type="button" variant="outline" disabled={saving}>
+                  Cancel
+                </Button>
+              </Link>
+              <Button
+                type="button"
+                variant="outline"
+                disabled={saving}
+                onClick={() => void handleSubmit(false)}
+              >
+                {saving ? (
+                  <Loader2 className="mr-1.5 size-4 animate-spin" aria-hidden />
+                ) : null}
+                Save draft
+              </Button>
+              {access?.canSend ? (
+                <Button
+                  type="button"
+                  disabled={saving}
+                  onClick={() => void handleSubmit(true)}
+                >
+                  <Send className="mr-1.5 size-4" aria-hidden />
+                  Save & send
+                </Button>
+              ) : null}
+            </div>
           </div>
         </div>
 
         <div className="xl:col-span-5">
-          <div className="sticky top-24 space-y-4">
-            <p className="text-xs font-semibold uppercase tracking-wide text-gray-500">
+          <div className="sticky top-24 space-y-3">
+            <p className="flex items-center gap-2 text-xs font-semibold uppercase tracking-wide text-gray-500">
+              <Eye className="size-3.5" aria-hidden />
               Live preview
             </p>
-            {preview && preview.lineItems.length > 0 ? (
-              <>
-                <p className="text-sm text-gray-600 dark:text-gray-400">
-                  Total:{" "}
-                  <strong className="text-gray-900 dark:text-white">
-                    {formatInvoiceAmount(preview.currency, preview.total)}
-                  </strong>
-                </p>
-                <InvoiceDocumentPreview
-                  invoice={preview}
-                  companyName={companyName}
-                  compact
-                />
-              </>
-            ) : (
-              <p className="rounded-xl border border-dashed border-gray-200 px-4 py-12 text-center text-sm text-gray-500 dark:border-gray-700">
-                Select a customer and add at least one line item to preview.
-              </p>
-            )}
+            <InvoiceDocumentView data={previewData} variant="preview" />
           </div>
         </div>
       </div>

@@ -1,4 +1,4 @@
-import axios from "axios";
+import axios, { AxiosHeaders } from "axios";
 import { clearAuthSession, getAccessToken } from "@/lib/auth-storage";
 import { API_BASE_URL } from "./config";
 
@@ -10,10 +10,30 @@ export const apiClient = axios.create({
   timeout: 30_000,
 });
 
-apiClient.interceptors.request.use((config) => {
-  if (config.data instanceof FormData) {
-    delete (config.headers as Record<string, unknown>)["Content-Type"];
+/** Per-request override so axios lets the browser set multipart boundary. */
+export const multipartPostConfig = {
+  headers: {
+    "Content-Type": false,
+  },
+} as const;
+
+function clearJsonContentTypeForMultipart(config: {
+  data?: unknown;
+  headers?: unknown;
+}) {
+  if (typeof FormData === "undefined" || !(config.data instanceof FormData)) {
+    return;
   }
+  const headers =
+    config.headers instanceof AxiosHeaders
+      ? config.headers
+      : AxiosHeaders.from((config.headers ?? {}) as AxiosHeaders);
+  headers.set("Content-Type", false);
+  config.headers = headers;
+}
+
+apiClient.interceptors.request.use((config) => {
+  clearJsonContentTypeForMultipart(config);
   const path = config.url ?? "";
   const isPublicAuth = path.startsWith("/api/auth/");
   const token = getAccessToken();

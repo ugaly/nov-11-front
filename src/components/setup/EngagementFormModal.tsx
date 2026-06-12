@@ -3,14 +3,18 @@
 import { getApiErrorMessage } from "@/api/errors";
 import {
   createEngagement,
+  getServiceCatalog,
   listCustomerEngagements,
   listCustomers,
   listServiceCatalogs,
   listServiceCategories,
+  suggestEngagementPeriods,
 } from "@/api/template-config/template-config.api";
 import type {
   CustomerEngagementResponse,
   CustomerListItemResponse,
+  PeriodSuggestionDto,
+  ServiceCatalogNodeResponse,
   ServiceCatalogResponse,
   ServiceCategoryResponse,
 } from "@/api/types/template-config";
@@ -22,6 +26,8 @@ import Label from "@/components/form/Label";
 import { Modal } from "@/components/ui/modal";
 import {
   engagementRequiresPeriodStart,
+  formatNodeRecurrence,
+  nodeRecurrenceType,
   recurrenceHint,
 } from "@/lib/template-recurrence";
 import { useEffect, useMemo, useState } from "react";
@@ -29,18 +35,19 @@ import { useEffect, useMemo, useState } from "react";
 const selectClass =
   "h-11 w-full rounded-lg border border-gray-300 bg-transparent px-4 text-sm text-gray-800 shadow-theme-xs dark:border-gray-700 dark:bg-gray-900 dark:text-white/90";
 
+type PeriodDraft = {
+  label: string;
+  periodStart: string;
+  periodEnd: string | null;
+  sortOrder: number;
+};
+
 function pickDefaultCategory(
   categories: ServiceCategoryResponse[]
 ): ServiceCategoryResponse | undefined {
   return (
     categories.find((c) => (c.catalogs?.length ?? 0) > 0) ?? categories[0]
   );
-}
-
-function pickDefaultCatalog(
-  category: ServiceCategoryResponse | undefined
-): string {
-  return category?.catalogs?.[0]?.id ?? "";
 }
 
 function mergeCatalogsIntoCategories(
@@ -69,6 +76,21 @@ function countAvailableCatalogs(
   return (catalogs ?? []).filter((c) => !excludedCatalogIds.has(c.id)).length;
 }
 
+function rootGroupNodes(
+  nodes: ServiceCatalogNodeResponse[] | undefined
+): ServiceCatalogNodeResponse[] {
+  return (nodes ?? []).filter((n) => n.nodeType === "GROUP");
+}
+
+function toPeriodDrafts(suggestions: PeriodSuggestionDto[]): PeriodDraft[] {
+  return suggestions.map((s) => ({
+    label: s.label,
+    periodStart: s.periodStart,
+    periodEnd: s.periodEnd,
+    sortOrder: s.sortOrder,
+  }));
+}
+
 export default function EngagementFormModal({
   open,
   companyId,
@@ -89,10 +111,16 @@ export default function EngagementFormModal({
   const [customerId, setCustomerId] = useState("");
   const [categoryId, setCategoryId] = useState("");
   const [catalogId, setCatalogId] = useState("");
+  const [catalogDetail, setCatalogDetail] = useState<ServiceCatalogResponse | null>(
+    null
+  );
+  const [selectedRootIds, setSelectedRootIds] = useState<string[]>([]);
   const [title, setTitle] = useState("");
   const [description, setDescription] = useState("");
   const [periodStart, setPeriodStart] = useState("");
   const [periodEnd, setPeriodEnd] = useState("");
+  const [periodDrafts, setPeriodDrafts] = useState<PeriodDraft[]>([]);
+  const [loadingPeriods, setLoadingPeriods] = useState(false);
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [assignedCatalogIds, setAssignedCatalogIds] = useState<string[]>([]);
@@ -127,9 +155,27 @@ export default function EngagementFormModal({
     }
     return false;
   }, [categories, excludedCatalogIds]);
-  const selectedCatalog = catalogsInCategory.find((c) => c.id === catalogId);
+
+  const rootGroups = useMemo(
+    () => rootGroupNodes(catalogDetail?.nodes),
+    [catalogDetail?.nodes]
+  );
+
+  const selectedRoots = rootGroups.filter((n) => selectedRootIds.includes(n.id));
+  const recurringSelected = selectedRoots.filter(
+    (n) => nodeRecurrenceType(n) !== "ONE_OFF"
+  );
+  const configurePeriodsAtCreate =
+    selectedRoots.length === 1 && recurringSelected.length === 1;
+  const singleRecurringRoot = configurePeriodsAtCreate
+    ? recurringSelected[0]
+    : undefined;
+  const recurrenceType = singleRecurringRoot
+    ? nodeRecurrenceType(singleRecurringRoot)
+    : "ONE_OFF";
+  const isRecurring = configurePeriodsAtCreate;
   const needsPeriodStart = engagementRequiresPeriodStart(
-    selectedCatalog?.recurrenceType
+    configurePeriodsAtCreate ? recurrenceType : "ONE_OFF"
   );
 
   useEffect(() => {
@@ -188,6 +234,9 @@ export default function EngagementFormModal({
       setDescription("");
       setPeriodStart("");
       setPeriodEnd("");
+      setPeriodDrafts([]);
+      setCatalogDetail(null);
+      setSelectedRootIds([]);
       setError(null);
       setAssignedCatalogIds([]);
     }
@@ -229,6 +278,97 @@ export default function EngagementFormModal({
     );
   }, [categoryId, categoryOptions, excludedCatalogIds, open, loadingAssignments]);
 
+  useEffect(() => {
+    if (!open || !catalogId || !companyId) {
+      setCatalogDetail(null);
+      setSelectedRootIds([]);
+      return;
+    }
+    let cancelled = false;
+    void (async () => {
+      try {
+        const detail = await getServiceCatalog(companyId, catalogId);
+        if (!cancelled) {
+          setCatalogDetail(detail);
+          const roots = rootGroupNodes(detail.nodes);
+          setSelectedRootIds((prev) => {
+            const stillValid = prev.filter((id) =>
+              roots.some((n) => n.id === id)
+            );
+            return stillValid.length > 0
+              ? stillValid
+              : roots.map((n) => n.id);
+          });
+        }
+      } catch {
+        if (!cancelled) {
+          setCatalogDetail(null);
+          setSelectedRootIds([]);
+        }
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [open, catalogId, companyId]);
+
+  useEffect(() => {
+    if (!open || !companyId || !catalogId || !singleRecurringRoot) {
+      setPeriodDrafts([]);
+      return;
+    }
+    if (!isRecurring) {
+      setPeriodDrafts([]);
+      return;
+    }
+    if (needsPeriodStart && !periodStart.trim()) {
+      setPeriodDrafts([]);
+      return;
+    }
+    let cancelled = false;
+    setLoadingPeriods(true);
+    void (async () => {
+      try {
+        const suggestions = await suggestEngagementPeriods(
+          companyId,
+          catalogId,
+          singleRecurringRoot.id,
+          { periodStart: periodStart.trim() || undefined }
+        );
+        if (!cancelled) {
+          setPeriodDrafts(toPeriodDrafts(suggestions));
+        }
+      } catch {
+        if (!cancelled) setPeriodDrafts([]);
+      } finally {
+        if (!cancelled) setLoadingPeriods(false);
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [
+    open,
+    companyId,
+    catalogId,
+    singleRecurringRoot?.id,
+    isRecurring,
+    needsPeriodStart,
+    periodStart,
+  ]);
+
+  function toggleRoot(id: string) {
+    setSelectedRootIds((prev) =>
+      prev.includes(id) ? prev.filter((x) => x !== id) : [...prev, id]
+    );
+  }
+
+  function updatePeriodLabel(index: number, label: string) {
+    setPeriodDrafts((prev) =>
+      prev.map((p, i) => (i === index ? { ...p, label } : p))
+    );
+  }
+
   async function handleSubmit(e: React.FormEvent) {
     e.preventDefault();
     const resolvedCustomerId = fixedCustomerId ?? customerId;
@@ -236,8 +376,12 @@ export default function EngagementFormModal({
       setError("Category, catalog, and title are required.");
       return;
     }
-    if (needsPeriodStart && !periodStart.trim()) {
-      setError("Period start is required for this catalog’s recurrence.");
+    if (selectedRootIds.length === 0) {
+      setError("Select at least one root service group.");
+      return;
+    }
+    if (configurePeriodsAtCreate && needsPeriodStart && !periodStart.trim()) {
+      setError("Cycle anchor is required for the recurring group.");
       return;
     }
     if (excludedCatalogIds.has(catalogId)) {
@@ -247,13 +391,31 @@ export default function EngagementFormModal({
     setSubmitting(true);
     setError(null);
     try {
+      const useMultiRoot = rootGroups.length > 1;
       const created = await createEngagement(companyId, {
         customerId: resolvedCustomerId,
         catalogId,
+        catalogEntryNodeId:
+          !useMultiRoot && selectedRootIds.length === 1
+            ? selectedRootIds[0]
+            : undefined,
+        includedRootNodeIds: useMultiRoot ? selectedRootIds : undefined,
         title: title.trim(),
         description: description.trim() || undefined,
         periodStart: periodStart.trim() || undefined,
-        periodEnd: periodEnd.trim() || undefined,
+        periodEnd: !configurePeriodsAtCreate
+          ? periodEnd.trim() || undefined
+          : undefined,
+        periods:
+          configurePeriodsAtCreate && periodDrafts.length > 0
+          ? periodDrafts.map((p) => ({
+              catalogNodeId: singleRecurringRoot!.id,
+              label: p.label.trim() || p.periodStart,
+              periodStart: p.periodStart,
+              periodEnd: p.periodEnd,
+              sortOrder: p.sortOrder,
+            }))
+          : undefined,
       });
       onCreated(created);
     } catch (err) {
@@ -269,7 +431,9 @@ export default function EngagementFormModal({
         New engagement
       </h3>
       <p className="mt-1 text-xs text-gray-500">
-        Reference number is assigned automatically when saved.
+        Reference number is assigned automatically. Select which root groups to
+        include; configure recurring period tabs when you open the engagement
+        (or now if only one recurring group is selected).
       </p>
       <form className="mt-4 space-y-4" onSubmit={(e) => void handleSubmit(e)}>
         {error ? <p className="text-sm text-error-600">{error}</p> : null}
@@ -314,16 +478,12 @@ export default function EngagementFormModal({
           <select
             className={selectClass}
             value={categoryId}
-            disabled={
-              loadingAssignments || categoryOptions.length === 0
-            }
+            disabled={loadingAssignments || categoryOptions.length === 0}
             onChange={(e) => setCategoryId(e.target.value)}
           >
             {categoryOptions.length === 0 ? (
               <option value="">
-                {loadingAssignments
-                  ? "Loading…"
-                  : "No service categories"}
+                {loadingAssignments ? "Loading…" : "No service categories"}
               </option>
             ) : (
               categoryOptions.map((c) => {
@@ -371,32 +531,125 @@ export default function EngagementFormModal({
               ))
             )}
           </select>
-          {selectedCatalog?.recurrenceType ? (
-            <p className="mt-1 text-xs text-gray-500">
-              {recurrenceHint(selectedCatalog.recurrenceType)}
-            </p>
-          ) : null}
         </div>
+
+        {rootGroups.length > 0 ? (
+          <div className="space-y-2">
+            <Label>Root service groups *</Label>
+            <p className="text-xs text-gray-500">
+              Include one-off and recurring groups together. Period tabs for
+              recurring groups can be set when you open the engagement.
+            </p>
+            <div className="space-y-2 rounded-lg border border-gray-200 p-3 dark:border-gray-700">
+              {rootGroups.map((n) => {
+                const type = nodeRecurrenceType(n);
+                const checked = selectedRootIds.includes(n.id);
+                return (
+                  <label
+                    key={n.id}
+                    className="flex cursor-pointer items-start gap-3 rounded-lg px-2 py-1.5 hover:bg-gray-50 dark:hover:bg-gray-900/40"
+                  >
+                    <input
+                      type="checkbox"
+                      checked={checked}
+                      onChange={() => toggleRoot(n.id)}
+                      className="mt-1 size-4 rounded border-gray-300"
+                    />
+                    <span className="min-w-0 flex-1">
+                      <span className="block text-sm font-medium text-gray-800 dark:text-white/90">
+                        {n.name}
+                      </span>
+                      <span className="text-xs text-gray-500">
+                        {formatNodeRecurrence(n)}
+                        {type === "ONE_OFF"
+                          ? " · work uses catalog default forms"
+                          : ` · ${recurrenceHint(type)}`}
+                      </span>
+                    </span>
+                  </label>
+                );
+              })}
+            </div>
+            {recurringSelected.length > 1 ? (
+              <p className="text-xs text-brand-600 dark:text-brand-400">
+                Multiple recurring groups selected — configure each group&apos;s
+                period tabs after creating the engagement.
+              </p>
+            ) : null}
+          </div>
+        ) : catalogId ? (
+          <p className="text-xs text-amber-700 dark:text-amber-300">
+            This catalog has no root GROUP nodes yet. Add one in the catalog
+            structure with recurrence configured.
+          </p>
+        ) : null}
 
         <DatePicker
           id="engagement-period-start"
-          label={`Period start${needsPeriodStart ? " *" : ""}`}
+          label={`Cycle anchor${needsPeriodStart ? " *" : ""}`}
           placeholder="Select start date"
           value={periodStart}
           onValueChange={setPeriodStart}
         />
-        <div>
-          <DatePicker
-            id="engagement-period-end"
-            label="Period end"
-            placeholder="Select end date"
-            value={periodEnd}
-            onValueChange={setPeriodEnd}
-          />
-          <p className="mt-1 text-xs text-gray-500">
-            Optional for annual catalogs (server sets end = start + 12 months).
-          </p>
-        </div>
+
+        {!isRecurring ? (
+          <div>
+            <DatePicker
+              id="engagement-period-end"
+              label="Period end"
+              placeholder="Select end date"
+              value={periodEnd}
+              onValueChange={setPeriodEnd}
+            />
+            <p className="mt-1 text-xs text-gray-500">
+              Optional for one-off engagements (defaults to today).
+            </p>
+          </div>
+        ) : null}
+
+        {configurePeriodsAtCreate ? (
+          <div className="space-y-3 rounded-lg border border-gray-200 p-4 dark:border-gray-700">
+            <p className="text-xs font-medium uppercase tracking-wide text-gray-500">
+              Period tabs (optional now)
+            </p>
+            <p className="text-xs text-gray-500">
+              Only one recurring group is selected — name each cycle now, or
+              skip and configure when you open the engagement.
+            </p>
+            {loadingPeriods ? (
+              <p className="text-xs text-gray-500">Generating periods…</p>
+            ) : periodDrafts.length === 0 ? (
+              <p className="text-xs text-gray-500">
+                Set a cycle anchor date to generate period tabs.
+              </p>
+            ) : (
+              <div className="space-y-2">
+                {periodDrafts.map((p, index) => (
+                  <div
+                    key={`${p.sortOrder}-${p.periodStart}`}
+                    className="flex flex-wrap items-center gap-2 rounded-lg bg-gray-50 px-3 py-2 dark:bg-gray-900/40"
+                  >
+                    <span className="min-w-[4.5rem] text-xs font-medium text-gray-500">
+                      Tab {index + 1}
+                    </span>
+                    <Input
+                      value={p.label}
+                      onChange={(e) => updatePeriodLabel(index, e.target.value)}
+                      placeholder="e.g. January 2026"
+                      className="min-w-[10rem] flex-1"
+                    />
+                    <span className="text-xs text-gray-500">
+                      {p.periodEnd
+                        ? `${p.periodStart} → ${p.periodEnd}`
+                        : p.periodStart}
+                    </span>
+                  </div>
+                ))}
+              </div>
+            )}
+          </div>
+        ) : null}
+
         <div>
           <Label>Title *</Label>
           <Input value={title} onChange={(e) => setTitle(e.target.value)} />
@@ -420,6 +673,7 @@ export default function EngagementFormModal({
               loadingAssignments ||
               !categoryId ||
               !catalogId ||
+              selectedRootIds.length === 0 ||
               catalogsInCategory.length === 0 ||
               !hasAssignableCatalog
             }

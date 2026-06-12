@@ -1,6 +1,22 @@
 "use client";
 
-import PaymentStatusBadge from "@/components/payments/PaymentStatusBadge";
+import {
+  approveOfficePayment,
+  cancelOfficePayment,
+  getOfficePayment,
+  updateOfficePaymentReferences,
+  reopenCancelledOfficePayment,
+  markOfficePaymentPaid,
+  submitPaymentForApproval,
+  uploadPaymentAttachment,
+} from "@/api/payment/payment.api";
+import type {
+  OfficePaymentResponse,
+  PaymentReferenceDto,
+} from "@/api/types/payment";
+import PaymentReferencesEditor from "@/components/payments/PaymentReferencesEditor";
+import PaymentWorkflowStatusBar from "@/components/payments/PaymentWorkflowStatusBar";
+import ReferenceBox from "@/components/shared/ReferenceBox";
 import ReminderList from "@/components/shared/ReminderList";
 import {
   SetupBackLink,
@@ -11,51 +27,81 @@ import Button from "@/components/ui/button/Button";
 import Input from "@/components/form/input/InputField";
 import Label from "@/components/form/Label";
 import { Modal } from "@/components/ui/modal";
-import { fileToDataUrlAttachment } from "@/lib/attachment-utils";
+import { useToast } from "@/context/ToastContext";
+import { getApiErrorMessage } from "@/lib/api-error";
+import { getStoredUser } from "@/lib/auth-storage";
+import { usePaymentAccess } from "@/lib/payments/use-payment-access";
 import {
-  getPaymentById,
-  savePayment,
-} from "@/lib/payments/payment-storage";
-import type {
-  PaymentAttachment,
-  PaymentMethod,
-  PaymentRecord,
-} from "@/lib/payments/payment-types";
-import {
-  derivePaymentStatus,
   formatPaymentAmount,
   formatPaymentDate,
-  PAYMENT_CATEGORY_LABELS,
-  PAYMENT_METHOD_LABELS,
   paymentBalance,
 } from "@/lib/payments/payment-utils";
+import { usePaymentOptions } from "@/lib/payments/use-payment-options";
+import type { ReminderEntry } from "@/lib/reminders/reminder-types";
 import {
   Banknote,
   Calendar,
+  CheckCircle2,
   ChevronLeft,
-  ExternalLink,
   FileText,
   History,
   Loader2,
   Paperclip,
+  RotateCcw,
+  Send,
   Wallet,
   X,
 } from "lucide-react";
 import { useCallback, useEffect, useState } from "react";
 
 export default function PaymentDetailPanel({ paymentId }: { paymentId: string }) {
-  const [payment, setPayment] = useState<PaymentRecord | null>(null);
-  const [recordOpen, setRecordOpen] = useState(false);
+  const toast = useToast();
+  const me = getStoredUser();
+  const { officeId, access, loading: accessLoading, refresh: refreshAccess } =
+    usePaymentAccess();
+  const { methods, loading: methodsLoading } = usePaymentOptions();
+  const [payment, setPayment] = useState<OfficePaymentResponse | null>(null);
+  const [loading, setLoading] = useState(true);
   const [busy, setBusy] = useState(false);
-  const [note, setNote] = useState<string | null>(null);
+  const [uploadingAttachment, setUploadingAttachment] = useState(false);
+  const [markPaidOpen, setMarkPaidOpen] = useState(false);
 
-  const refresh = useCallback(() => {
-    setPayment(getPaymentById(paymentId) ?? null);
-  }, [paymentId]);
+  const refresh = useCallback(async () => {
+    if (!officeId) return;
+    setLoading(true);
+    try {
+      setPayment(await getOfficePayment(officeId, paymentId));
+    } catch {
+      setPayment(null);
+    } finally {
+      setLoading(false);
+    }
+  }, [officeId, paymentId]);
 
   useEffect(() => {
-    refresh();
-  }, [refresh]);
+    void refreshAccess();
+    void refresh();
+  }, [refresh, refreshAccess, paymentId]);
+
+  if (accessLoading || loading || methodsLoading) {
+    return (
+      <div className="flex min-h-[40vh] items-center justify-center">
+        <Loader2 className="size-8 animate-spin text-gray-400" aria-hidden />
+      </div>
+    );
+  }
+
+  if (!officeId || !access?.visible) {
+    return (
+      <div className="space-y-4">
+        <SetupBackLink href="/payments">
+          <ChevronLeft className="size-4" aria-hidden />
+          Back to payments
+        </SetupBackLink>
+        <p className="text-sm text-gray-500">Payments are not available for your account.</p>
+      </div>
+    );
+  }
 
   if (!payment) {
     return (
@@ -71,76 +117,196 @@ export default function PaymentDetailPanel({ paymentId }: { paymentId: string })
 
   const p = payment;
   const balance = paymentBalance(p);
-  const canPay = p.status !== "PAID" && p.status !== "CANCELLED";
+  const isCreator =
+    Boolean(p.createdBy?.id && me?.id) &&
+    p.createdBy!.id.toLowerCase() === me!.id!.toLowerCase();
+  const canSubmit = access.canSubmit && p.status === "DRAFT";
+  const canApprove =
+    access.canApprove && p.status === "SUBMITTED_FOR_APPROVAL";
+  const canMarkPaid =
+    access.canMarkPaid &&
+    (p.status === "APPROVED" || p.status === "PARTIALLY_PAID");
+  const canCancel =
+    p.status !== "PAID" &&
+    p.status !== "PARTIALLY_PAID" &&
+    p.status !== "CANCELLED" &&
+    (isCreator || access.canApprove);
+  const canReopen =
+    p.status === "CANCELLED" && (isCreator || access.canApprove);
+  const canEditReferences = p.status === "DRAFT" && access.canCreate;
+  const paymentReferences: PaymentReferenceDto[] = p.references ?? [];
 
-  function appendHistory(
-    record: PaymentRecord,
-    entry: PaymentRecord["history"][0]
-  ): PaymentRecord {
-    return { ...record, history: [entry, ...record.history] };
+  async function handleAttachmentUpload(file: File) {
+    if (!officeId) {
+      toast.showError("Office not available.");
+      return;
+    }
+    setUploadingAttachment(true);
+    try {
+      const updated = await uploadPaymentAttachment(officeId, paymentId, file);
+      setPayment(updated);
+      toast.showSuccess("Attachment uploaded.");
+    } catch (err) {
+      toast.showError(getApiErrorMessage(err, "Upload failed."));
+    } finally {
+      setUploadingAttachment(false);
+    }
   }
 
-  async function cancelPayment() {
+  async function saveReferences(next: PaymentReferenceDto[]) {
+    if (!officeId) return;
     setBusy(true);
-    await new Promise((r) => setTimeout(r, 400));
-    const updated = savePayment({
-      ...p,
-      status: "CANCELLED",
-      history: [
-        {
-          id: `h-${Date.now()}`,
-          at: new Date().toISOString().slice(0, 10),
-          label: "Cancelled",
-        },
-        ...p.history,
-      ],
-    });
-    setPayment(updated);
-    setNote("Payment cancelled.");
-    setBusy(false);
+    try {
+      const updated = await updateOfficePaymentReferences(
+        officeId,
+        p.id,
+        next
+      );
+      setPayment(updated);
+      toast.showSuccess("References updated.");
+    } catch (e) {
+      toast.showError(e instanceof Error ? e.message : "Could not save references.");
+    } finally {
+      setBusy(false);
+    }
   }
+
+  const pendingHint =
+    p.status === "SUBMITTED_FOR_APPROVAL" && !canApprove
+      ? "You need Approve permission (Setup → Payment permissions) to approve this payment."
+      : (p.status === "APPROVED" || p.status === "PARTIALLY_PAID") && !canMarkPaid
+        ? "You need Mark paid permission to record payments."
+        : null;
+
+  async function runAction(
+    label: string,
+    fn: () => Promise<OfficePaymentResponse>
+  ) {
+    setBusy(true);
+    try {
+      const updated = await fn();
+      setPayment(updated);
+      toast.showSuccess(label);
+    } catch (e) {
+      toast.showError(e instanceof Error ? e.message : "Action failed.");
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  const reminderEntries: ReminderEntry[] = (p.reminders ?? []).map((r) => ({
+    id: r.id ?? `rem-${r.schedule}`,
+    schedule: r.schedule,
+    at: r.customAt,
+    note: r.note,
+  }));
 
   return (
     <div className="space-y-6">
+      <div className="flex flex-wrap items-center justify-between gap-x-4 gap-y-3">
+        <SetupBackLink href="/payments">
+          <ChevronLeft className="size-4" aria-hidden />
+          Back to payments
+        </SetupBackLink>
+        <PaymentWorkflowStatusBar
+          status={p.status}
+          className="w-full sm:ml-auto sm:w-auto"
+        />
+      </div>
+
       <div className="flex flex-wrap items-start justify-between gap-4">
-        <div>
-          <SetupBackLink href="/payments">
-            <ChevronLeft className="size-4" aria-hidden />
-            Back to payments
-          </SetupBackLink>
-          <div className="mt-3 flex flex-wrap items-center gap-3">
-            <h1 className="font-mono text-lg font-bold text-gray-900 dark:text-white">
-              {p.referenceNumber}
-            </h1>
-            <PaymentStatusBadge status={p.status} />
-          </div>
-          <p className="mt-1 text-sm text-gray-600 dark:text-gray-400">
-            {p.payeeName} · {PAYMENT_CATEGORY_LABELS[p.category]}
+        <div className="min-w-0 space-y-2">
+          <ReferenceBox
+            label="Payment reference"
+            value={p.referenceNumber}
+            readOnly
+            onCopy={() => {
+              void navigator.clipboard.writeText(p.referenceNumber);
+              toast.showSuccess("Reference copied.");
+            }}
+          />
+          <p className="text-sm text-gray-600 dark:text-gray-400">
+            {p.payeeName} · {p.categoryName}
           </p>
         </div>
         <div className="flex flex-wrap gap-2">
-          {canPay ? (
-            <Button size="sm" onClick={() => setRecordOpen(true)}>
-              <Banknote className="mr-1.5 size-4" aria-hidden />
-              Record payment
+          {canSubmit ? (
+            <Button
+              size="sm"
+              disabled={busy}
+              onClick={() =>
+                void runAction("Submitted for approval.", () =>
+                  submitPaymentForApproval(officeId, p.id)
+                )
+              }
+            >
+              <Send className="mr-1.5 size-4" aria-hidden />
+              Submit for approval
             </Button>
           ) : null}
-          {p.status !== "CANCELLED" && p.status !== "PAID" ? (
+          {canApprove ? (
+            <Button
+              size="sm"
+              disabled={busy}
+              onClick={() =>
+                void runAction("Payment approved.", () =>
+                  approveOfficePayment(officeId, p.id)
+                )
+              }
+            >
+              <CheckCircle2 className="mr-1.5 size-4" aria-hidden />
+              Approve
+            </Button>
+          ) : null}
+          {canMarkPaid ? (
+            <Button size="sm" disabled={busy} onClick={() => setMarkPaidOpen(true)}>
+              <Banknote className="mr-1.5 size-4" aria-hidden />
+              {p.status === "PARTIALLY_PAID" ? "Record payment" : "Mark as paid"}
+            </Button>
+          ) : null}
+          {canCancel ? (
             <Button
               size="sm"
               variant="outline"
               disabled={busy}
-              onClick={() => void cancelPayment()}
+              onClick={() =>
+                void runAction("Payment cancelled.", () =>
+                  cancelOfficePayment(officeId, p.id)
+                )
+              }
             >
               Cancel
+            </Button>
+          ) : null}
+          {canReopen ? (
+            <Button
+              size="sm"
+              disabled={busy}
+              onClick={() =>
+                void runAction("Returned to pending approval.", () =>
+                  reopenCancelledOfficePayment(officeId, p.id)
+                )
+              }
+            >
+              <RotateCcw className="mr-1.5 size-4" aria-hidden />
+              Return to pending approval
             </Button>
           ) : null}
         </div>
       </div>
 
-      {note ? (
-        <p className="rounded-lg bg-emerald-50 px-4 py-2 text-sm text-emerald-800 dark:bg-emerald-950/30 dark:text-emerald-300">
-          {note}
+      {pendingHint ? (
+        <p className="rounded-lg border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-900 dark:border-amber-900 dark:bg-amber-950/30 dark:text-amber-200">
+          {pendingHint}
+        </p>
+      ) : p.status === "SUBMITTED_FOR_APPROVAL" && canApprove && access.canMarkPaid ? (
+        <p className="rounded-lg border border-blue-200 bg-blue-50 px-4 py-3 text-sm text-blue-900 dark:border-blue-900 dark:bg-blue-950/30 dark:text-blue-200">
+          Approve this payment first; then record full or partial payments once approved.
+        </p>
+      ) : p.status === "PARTIALLY_PAID" ? (
+        <p className="rounded-lg border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-900 dark:border-amber-900 dark:bg-amber-950/30 dark:text-amber-200">
+          Partially paid — {formatPaymentAmount(p.currency, balance)} remaining of{" "}
+          {formatPaymentAmount(p.currency, Number(p.amountDue))}.
         </p>
       ) : null}
 
@@ -148,22 +314,22 @@ export default function PaymentDetailPanel({ paymentId }: { paymentId: string })
         <SetupStatCard
           icon={Wallet}
           label="Amount due"
-          value={formatPaymentAmount(p.currency, p.amountDue)}
+          value={formatPaymentAmount(p.currency, Number(p.amountDue))}
         />
         <SetupStatCard
           icon={Banknote}
           label="Paid"
-          value={formatPaymentAmount(p.currency, p.amountPaid)}
+          value={formatPaymentAmount(p.currency, Number(p.amountPaid))}
         />
         <SetupStatCard
           icon={Banknote}
-          label="Balance"
+          label="Remaining"
           value={formatPaymentAmount(p.currency, balance)}
         />
         <SetupStatCard
           icon={Calendar}
           label="Due date"
-          value={formatPaymentDate(p.dueAt)}
+          value={formatPaymentDate(p.dueDate)}
         />
       </div>
 
@@ -178,62 +344,146 @@ export default function PaymentDetailPanel({ paymentId }: { paymentId: string })
             {p.reconciliationNote ? (
               <DetailRow label="Reconciliation" value={p.reconciliationNote} />
             ) : null}
-            {p.linkedInvoiceNumber ? (
-              <DetailRow
-                label="Invoice link"
-                value={
-                  <span className="inline-flex items-center gap-1 font-mono text-xs">
-                    {p.linkedInvoiceNumber}
-                    <ExternalLink className="size-3 opacity-50" aria-hidden />
-                  </span>
-                }
-              />
-            ) : null}
-            {p.paymentMethod ? (
-              <DetailRow
-                label="Method"
-                value={PAYMENT_METHOD_LABELS[p.paymentMethod]}
-              />
+            {p.paymentMethodName ? (
+              <DetailRow label="Method" value={p.paymentMethodName} />
             ) : null}
             {p.paidAt ? (
               <DetailRow label="Paid on" value={formatPaymentDate(p.paidAt)} />
             ) : null}
-            <DetailRow label="Created" value={formatPaymentDate(p.createdAt)} />
+            {p.createdBy ? (
+              <DetailRow label="Created by" value={p.createdBy.fullName} />
+            ) : null}
+            {p.approvedBy ? (
+              <DetailRow label="Approved by" value={p.approvedBy.fullName} />
+            ) : null}
           </dl>
         </SetupSectionCard>
 
         <SetupSectionCard title="References & reminders">
           <p className="mb-2 text-xs font-medium uppercase tracking-wide text-gray-500">
+            Linked references
+          </p>
+          <PaymentReferencesEditor
+            references={paymentReferences}
+            editable={canEditReferences && !busy}
+            onChange={(next) => void saveReferences(next)}
+          />
+          <p className="mb-2 mt-5 text-xs font-medium uppercase tracking-wide text-gray-500">
             Attachments
           </p>
-          {p.attachments.length === 0 ? (
+          {(p.attachments ?? []).length === 0 ? (
             <p className="text-sm text-gray-500">No attachments.</p>
           ) : (
             <ul className="space-y-2">
-              {p.attachments.map((a) => (
+              {(p.attachments ?? []).map((a) => (
                 <li key={a.id}>
-                  <AttachmentLink attachment={a} />
+                  {a.url ? (
+                    <a
+                      href={a.url}
+                      target="_blank"
+                      rel="noreferrer"
+                      className="inline-flex items-center gap-2 text-sm font-medium text-brand-600 hover:underline dark:text-brand-400"
+                    >
+                      <FileText className="size-4" aria-hidden />
+                      {a.fileName}
+                    </a>
+                  ) : (
+                    <span className="inline-flex items-center gap-2 text-sm text-gray-700">
+                      <FileText className="size-4" aria-hidden />
+                      {a.fileName}
+                    </span>
+                  )}
                 </li>
               ))}
             </ul>
           )}
+          {p.status === "DRAFT" || p.status === "SUBMITTED_FOR_APPROVAL" ? (
+            <label
+              className={`mt-3 inline-flex items-center gap-2 rounded-lg border border-dashed border-gray-300 px-3 py-2 text-sm text-brand-600 dark:border-gray-700 ${
+                uploadingAttachment
+                  ? "cursor-wait opacity-70"
+                  : "cursor-pointer hover:bg-gray-50 dark:hover:bg-gray-900/50"
+              }`}
+            >
+              {uploadingAttachment ? (
+                <Loader2 className="size-4 animate-spin" aria-hidden />
+              ) : (
+                <Paperclip className="size-4" aria-hidden />
+              )}
+              {uploadingAttachment ? "Uploading…" : "Add attachment"}
+              <input
+                type="file"
+                className="sr-only"
+                disabled={uploadingAttachment || busy}
+                accept=".pdf,.png,.jpg,.jpeg,.webp,.doc,.docx,.xls,.xlsx,.txt,.csv"
+                onChange={(e) => {
+                  const file = e.target.files?.[0];
+                  e.target.value = "";
+                  if (!file) return;
+                  void handleAttachmentUpload(file);
+                }}
+              />
+            </label>
+          ) : null}
           <p className="mb-2 mt-4 text-xs font-medium uppercase tracking-wide text-gray-500">
-            Reminders
+            Email reminders
           </p>
           <ReminderList
-            reminders={p.reminders}
-            referenceDate={p.dueAt}
+            reminders={reminderEntries}
+            referenceDate={p.dueDate}
             referenceKind="due"
           />
         </SetupSectionCard>
       </div>
 
-      <SetupSectionCard title="Payment history">
-        {p.history.length === 0 ? (
+      {(p.installments ?? []).length > 0 ? (
+        <SetupSectionCard title="Payment installments">
+          <div className="overflow-x-auto">
+            <table className="w-full min-w-[32rem] text-left text-sm">
+              <thead>
+                <tr className="border-b border-gray-200 text-xs font-medium uppercase tracking-wide text-gray-500 dark:border-gray-700">
+                  <th className="pb-2 pr-4">Date</th>
+                  <th className="pb-2 pr-4">Amount</th>
+                  <th className="pb-2 pr-4">Method</th>
+                  <th className="pb-2 pr-4">Recorded by</th>
+                  <th className="pb-2">Note</th>
+                </tr>
+              </thead>
+              <tbody>
+                {p.installments!.map((row) => (
+                  <tr
+                    key={row.id}
+                    className="border-b border-gray-100 last:border-0 dark:border-gray-800"
+                  >
+                    <td className="py-2.5 pr-4 text-gray-900 dark:text-white">
+                      {formatPaymentDate(row.paidAt)}
+                    </td>
+                    <td className="py-2.5 pr-4 font-medium text-gray-900 dark:text-white">
+                      {formatPaymentAmount(p.currency, Number(row.amount))}
+                    </td>
+                    <td className="py-2.5 pr-4 text-gray-600 dark:text-gray-400">
+                      {row.paymentMethodName ?? "—"}
+                    </td>
+                    <td className="py-2.5 pr-4 text-gray-600 dark:text-gray-400">
+                      {row.recordedBy?.fullName ?? "—"}
+                    </td>
+                    <td className="py-2.5 text-gray-600 dark:text-gray-400">
+                      {row.note ?? "—"}
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        </SetupSectionCard>
+      ) : null}
+
+      <SetupSectionCard title="Activity">
+        {(p.activityLog ?? []).length === 0 ? (
           <p className="text-sm text-gray-500">No activity yet.</p>
         ) : (
           <ul className="space-y-4">
-            {p.history.map((h) => (
+            {p.activityLog!.map((h) => (
               <li
                 key={h.id}
                 className="flex gap-3 border-l-2 border-gray-200 pl-4 dark:border-gray-700"
@@ -244,10 +494,10 @@ export default function PaymentDetailPanel({ paymentId }: { paymentId: string })
                 />
                 <div>
                   <p className="text-sm font-semibold text-gray-900 dark:text-white">
-                    {h.label}
-                    {h.amount != null ? (
-                      <span className="ml-2 font-normal text-emerald-700 dark:text-emerald-400">
-                        {formatPaymentAmount(p.currency, h.amount)}
+                    {h.action}
+                    {h.actor ? (
+                      <span className="ml-2 font-normal text-gray-500">
+                        — {h.actor.fullName}
                       </span>
                     ) : null}
                   </p>
@@ -262,14 +512,20 @@ export default function PaymentDetailPanel({ paymentId }: { paymentId: string })
         )}
       </SetupSectionCard>
 
-      <RecordPaymentModal
-        open={recordOpen}
+      <MarkPaidModal
+        open={markPaidOpen}
         payment={p}
-        onClose={() => setRecordOpen(false)}
+        officeId={officeId}
+        methods={methods}
+        onClose={() => setMarkPaidOpen(false)}
         onSaved={(updated) => {
           setPayment(updated);
-          setRecordOpen(false);
-          setNote("Payment recorded.");
+          setMarkPaidOpen(false);
+          toast.showSuccess(
+            updated.status === "PAID"
+              ? "Payment fully paid."
+              : "Partial payment recorded."
+          );
         }}
       />
     </div>
@@ -293,102 +549,67 @@ function DetailRow({
   );
 }
 
-function AttachmentLink({ attachment }: { attachment: PaymentAttachment }) {
-  if (attachment.dataUrl) {
-    return (
-      <a
-        href={attachment.dataUrl}
-        download={attachment.name}
-        target="_blank"
-        rel="noreferrer"
-        className="inline-flex items-center gap-2 text-sm font-medium text-brand-600 hover:underline dark:text-brand-400"
-      >
-        <FileText className="size-4" aria-hidden />
-        {attachment.name}
-      </a>
-    );
-  }
-  return (
-    <span className="inline-flex items-center gap-2 text-sm text-gray-700 dark:text-gray-300">
-      <FileText className="size-4" aria-hidden />
-      {attachment.name}
-    </span>
-  );
-}
-
-function RecordPaymentModal({
+function MarkPaidModal({
   open,
   payment,
+  officeId,
+  methods,
   onClose,
   onSaved,
 }: {
   open: boolean;
-  payment: PaymentRecord;
+  payment: OfficePaymentResponse;
+  officeId: string;
+  methods: { id: string; name: string }[];
   onClose: () => void;
-  onSaved: (p: PaymentRecord) => void;
+  onSaved: (p: OfficePaymentResponse) => void;
 }) {
+  const toast = useToast();
   const balance = paymentBalance(payment);
-  const [amount, setAmount] = useState(String(balance));
-  const [method, setMethod] = useState<PaymentMethod>("BANK_TRANSFER");
-  const [detail, setDetail] = useState("");
-  const [attachment, setAttachment] = useState<PaymentAttachment | null>(null);
-  const [fileError, setFileError] = useState<string | null>(null);
+  const [methodId, setMethodId] = useState("");
+  const [amount, setAmount] = useState("");
+  const [note, setNote] = useState("");
   const [saving, setSaving] = useState(false);
-
   const selectClass =
     "h-11 w-full rounded-lg border border-gray-300 bg-white px-4 text-sm dark:border-gray-700 dark:bg-gray-900 dark:text-white/90";
 
   useEffect(() => {
     if (open) {
-      setAmount(String(paymentBalance(payment)));
-      setDetail("");
-      setAttachment(null);
-      setFileError(null);
+      setAmount(String(balance));
+      if (methods.length > 0) {
+        setMethodId(methods[0].id);
+      }
     }
-  }, [open, payment]);
-
-  async function onFile(e: React.ChangeEvent<HTMLInputElement>) {
-    const file = e.target.files?.[0];
-    e.target.value = "";
-    if (!file) return;
-    try {
-      setAttachment(await fileToDataUrlAttachment(file));
-      setFileError(null);
-    } catch (err) {
-      setFileError(err instanceof Error ? err.message : "Upload failed.");
-    }
-  }
+  }, [open, balance, methods]);
 
   async function submit() {
-    const pay = Number(amount.replace(/,/g, ""));
-    if (!pay || pay <= 0) return;
+    if (!methodId) {
+      toast.showError("Select a payment method.");
+      return;
+    }
+    const payAmount = Number(amount.replace(/,/g, ""));
+    if (!payAmount || payAmount <= 0) {
+      toast.showError("Enter a valid payment amount.");
+      return;
+    }
+    if (payAmount > balance) {
+      toast.showError(
+        `Amount cannot exceed the remaining balance (${formatPaymentAmount(payment.currency, balance)}).`
+      );
+      return;
+    }
     setSaving(true);
-    const today = new Date().toISOString().slice(0, 10);
-    const newPaid = Math.min(payment.amountDue, payment.amountPaid + pay);
-    const attachments = attachment
-      ? [...payment.attachments, attachment]
-      : payment.attachments;
-    const updated = savePayment({
-      ...payment,
-      amountPaid: newPaid,
-      paidAt: today,
-      paymentMethod: method,
-      attachments,
-      status: derivePaymentStatus(payment.amountDue, newPaid),
-      history: [
-        {
-          id: `h-${Date.now()}`,
-          at: today,
-          label: newPaid >= payment.amountDue ? "Paid in full" : "Partial payment",
-          amount: pay,
-          detail: detail.trim() || PAYMENT_METHOD_LABELS[method],
-        },
-        ...payment.history,
-      ],
-    });
-    await new Promise((r) => setTimeout(r, 300));
-    setSaving(false);
-    onSaved(updated);
+    try {
+      const updated = await markOfficePaymentPaid(officeId, payment.id, {
+        paymentMethodId: methodId,
+        amount: payAmount,
+        note: note.trim() || undefined,
+      });
+      onSaved(updated);
+    } catch (e) {
+      toast.showError(e instanceof Error ? e.message : "Could not record payment.");
+      setSaving(false);
+    }
   }
 
   return (
@@ -397,73 +618,62 @@ function RecordPaymentModal({
         Record payment
       </h2>
       <p className="mt-1 text-sm text-gray-500">
-        Balance {formatPaymentAmount(payment.currency, balance)}
+        {payment.payeeName} · due {formatPaymentAmount(payment.currency, Number(payment.amountDue))}
+      </p>
+      <p className="mt-2 text-sm font-medium text-gray-800 dark:text-gray-200">
+        Remaining balance: {formatPaymentAmount(payment.currency, balance)}
       </p>
       <div className="mt-4 space-y-4">
         <div>
-          <Label>Amount</Label>
+          <Label>Amount to pay (TZS) *</Label>
           <Input
             type="number"
             value={amount}
             onChange={(e) => setAmount(e.target.value)}
             className="mt-1.5"
           />
+          <p className="mt-1 text-xs text-gray-500">
+            Defaults to the full remaining balance. Enter less for a partial payment.
+          </p>
         </div>
         <div>
-          <Label>Method</Label>
-          <select
-            className={`${selectClass} mt-1.5`}
-            value={method}
-            onChange={(e) => setMethod(e.target.value as PaymentMethod)}
-          >
-            {Object.entries(PAYMENT_METHOD_LABELS).map(([k, label]) => (
-              <option key={k} value={k}>
-                {label}
-              </option>
-            ))}
-          </select>
+          <Label>Payment method</Label>
+          {methods.length === 0 ? (
+            <p className="mt-1 text-sm text-gray-500">
+              No payment methods configured. Add them under Setup → Payment methods.
+            </p>
+          ) : (
+            <select
+              className={`${selectClass} mt-1.5`}
+              value={methodId}
+              onChange={(e) => setMethodId(e.target.value)}
+            >
+              {methods.map((m) => (
+                <option key={m.id} value={m.id}>
+                  {m.name}
+                </option>
+              ))}
+            </select>
+          )}
         </div>
         <div>
           <Label>Note</Label>
           <Input
-            value={detail}
-            onChange={(e) => setDetail(e.target.value)}
+            value={note}
+            onChange={(e) => setNote(e.target.value)}
             placeholder="Transfer ref, receipt no."
             className="mt-1.5"
           />
-        </div>
-        <div>
-          <label className="inline-flex cursor-pointer items-center gap-2 text-sm text-brand-600">
-            <Paperclip className="size-4" aria-hidden />
-            Attach receipt
-            <input
-              type="file"
-              className="sr-only"
-              accept=".pdf,.png,.jpg,.jpeg"
-              onChange={(e) => void onFile(e)}
-            />
-          </label>
-          {attachment ? (
-            <p className="mt-1 flex items-center gap-2 text-xs text-gray-600">
-              {attachment.name}
-              <button type="button" onClick={() => setAttachment(null)}>
-                <X className="size-3.5" aria-hidden />
-              </button>
-            </p>
-          ) : null}
-          {fileError ? (
-            <p className="text-xs text-rose-600">{fileError}</p>
-          ) : null}
         </div>
         <div className="flex justify-end gap-2">
           <Button variant="outline" onClick={onClose}>
             Cancel
           </Button>
-          <Button disabled={saving} onClick={() => void submit()}>
+          <Button disabled={saving || methods.length === 0} onClick={() => void submit()}>
             {saving ? (
               <Loader2 className="mr-2 size-4 animate-spin" aria-hidden />
             ) : null}
-            Save
+            Confirm payment
           </Button>
         </div>
       </div>

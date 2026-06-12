@@ -83,9 +83,21 @@ export interface WorkItemExecutionBundleResponse {
   values: WorkItemFieldValuesResponse;
   formLink: WorkItemFormLinkSummaryDto | null;
   closure: WorkItemClosureResponse;
+  activityLogs?: WorkItemActivityLogDto[];
   responsesLocked: boolean;
   internalEditEnabled?: boolean;
   publicSubmitEnabled?: boolean;
+}
+
+export interface WorkItemActivityLogDto {
+  id: string;
+  actionType: string;
+  fromStatus?: string | null;
+  toStatus?: string | null;
+  remark?: string | null;
+  occurredAt: string;
+  actorUserId?: string | null;
+  actorName?: string | null;
 }
 
 export interface SaveFieldValuesRequest {
@@ -100,6 +112,8 @@ export interface PutFieldTemplateRequest {
 export interface CreateFormLinkRequest {
   regenerateToken?: boolean;
   expiresAt?: string | null;
+  /** Recurring period tab whose field templates this link uses. */
+  engagementPeriodId?: string | null;
 }
 
 export interface PatchFormLinkRequest {

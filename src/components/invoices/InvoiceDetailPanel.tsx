@@ -1,89 +1,137 @@
 "use client";
 
-import EditableInvoiceDocument from "@/components/invoices/EditableInvoiceDocument";
-import InvoiceDocumentPreview from "@/components/invoices/InvoiceDocumentPreview";
-import InvoiceStatusBadge from "@/components/invoices/InvoiceStatusBadge";
-import ResendInvoiceModal from "@/components/invoices/ResendInvoiceModal";
 import {
-  SetupAvatar,
+  downloadOfficeInvoicePdf,
+  getOfficeInvoice,
+  markOfficeInvoicePaid,
+  resendOfficeInvoice,
+  sendOfficeInvoice,
+  voidOfficeInvoice,
+} from "@/api/invoice/invoice.api";
+import type {
+  MarkInvoicePaidRequest,
+  OfficeInvoiceResponse,
+} from "@/api/types/invoice";
+import InvoiceDocumentView from "@/components/invoices/InvoiceDocumentView";
+import InvoiceStatusBadge from "@/components/invoices/InvoiceStatusBadge";
+import InvoiceWorkflowStatusBar from "@/components/invoices/InvoiceWorkflowStatusBar";
+import ReminderList from "@/components/shared/ReminderList";
+import {
   SetupBackLink,
-  SetupContactLine,
   SetupSectionCard,
   SetupStatCard,
 } from "@/components/setup/setup-pro-ui";
 import Button from "@/components/ui/button/Button";
+import Input from "@/components/form/input/InputField";
+import Label from "@/components/form/Label";
 import { Modal } from "@/components/ui/modal";
+import { useToast } from "@/context/ToastContext";
 import { useCompanyContext } from "@/hooks/useCompanyContext";
-import { downloadInvoicePdf } from "@/lib/export/invoice-document-pdf";
-import { getDummyInvoiceById } from "@/lib/invoices/invoice-dummy-data";
-import type { InvoiceRecord } from "@/lib/invoices/invoice-types";
+import { getStoredUser } from "@/lib/auth-storage";
+import { useInvoiceAccess } from "@/lib/invoices/use-invoice-access";
+import { downloadBlob } from "@/lib/download-blob";
 import {
-  computeDisplayStatus,
-  daysUntilDue,
   formatInvoiceAmount,
   formatInvoiceDate,
-  INVOICE_TYPE_LABELS,
-  recalculateInvoice,
+  invoiceBalance,
 } from "@/lib/invoices/invoice-utils";
+import type { ReminderEntry, ReminderSchedule } from "@/lib/reminders/reminder-types";
 import {
-  ArrowUpCircle,
+  Ban,
   Banknote,
   Calendar,
+  CheckCircle2,
   ChevronLeft,
-  Copy,
   Download,
-  FileText,
-  History,
   Loader2,
   Mail,
-  Pencil,
-  RefreshCw,
   RotateCcw,
-  XCircle,
+  Send,
+  User,
+  Wallet,
 } from "lucide-react";
-import Link from "next/link";
-import { useRouter } from "next/navigation";
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 
 export default function InvoiceDetailPanel({ invoiceId }: { invoiceId: string }) {
-  const router = useRouter();
-  const { companyName, loading: ctxLoading, error: ctxError, reload } =
-    useCompanyContext();
-  const [invoice, setInvoice] = useState<InvoiceRecord | null>(() =>
-    getDummyInvoiceById(invoiceId) ?? null
-  );
-  const [resendOpen, setResendOpen] = useState(false);
-  const [paidModalOpen, setPaidModalOpen] = useState(false);
-  const [actionNote, setActionNote] = useState<string | null>(null);
+  const toast = useToast();
+  const { companyName } = useCompanyContext();
+  const me = getStoredUser();
+  const { officeId, access, loading: accessLoading, refresh: refreshAccess } =
+    useInvoiceAccess();
+  const [invoice, setInvoice] = useState<OfficeInvoiceResponse | null>(null);
+  const [loading, setLoading] = useState(true);
   const [busy, setBusy] = useState(false);
-  const [pdfBusy, setPdfBusy] = useState(false);
-  const [editing, setEditing] = useState(false);
-  const [editDraft, setEditDraft] = useState<InvoiceRecord | null>(null);
+  const [downloading, setDownloading] = useState(false);
+  const [markPaidOpen, setMarkPaidOpen] = useState(false);
+
+  const refresh = useCallback(async () => {
+    if (!officeId) return;
+    setLoading(true);
+    try {
+      setInvoice(await getOfficeInvoice(officeId, invoiceId));
+    } catch {
+      setInvoice(null);
+    } finally {
+      setLoading(false);
+    }
+  }, [officeId, invoiceId]);
 
   useEffect(() => {
-    if (invoice && !editing) setEditDraft(invoice);
-  }, [invoice, editing]);
+    void refreshAccess();
+    void refresh();
+  }, [refresh, refreshAccess, invoiceId]);
 
-  const refresh = useCallback(() => {
-    setInvoice(getDummyInvoiceById(invoiceId) ?? null);
-  }, [invoiceId]);
+  const documentData = useMemo(() => {
+    if (!invoice) return null;
+    const balance = invoiceBalance(invoice);
+    return {
+      referenceNumber: invoice.referenceNumber,
+      status: invoice.status,
+      billToName: invoice.billToName,
+      billToEmail: invoice.billToEmail,
+      issueDate: invoice.issueDate,
+      dueDate: invoice.dueDate,
+      currency: invoice.currency,
+      lineItems: invoice.lineItems.map((l) => ({
+        description: l.description,
+        quantity: Number(l.quantity),
+        unitPrice: Number(l.unitPrice),
+        lineAmount: Number(l.lineAmount),
+      })),
+      subtotal: Number(invoice.subtotal),
+      taxRate: Number(invoice.taxRate),
+      taxAmount: Number(invoice.taxAmount),
+      totalAmount: Number(invoice.totalAmount),
+      taxIncluded: invoice.taxIncluded,
+      amountPaid: Number(invoice.amountPaid),
+      amountRemaining: balance > 0 ? balance : undefined,
+      notes: invoice.notes ?? undefined,
+      terms: invoice.terms ?? undefined,
+      companyName,
+    };
+  }, [invoice, companyName]);
 
-  if (ctxLoading) {
-    return <p className="text-sm text-gray-500">Loading workspace…</p>;
-  }
-
-  if (ctxError) {
+  if (accessLoading || loading) {
     return (
-      <p className="text-sm text-error-700">
-        {ctxError}{" "}
-        <button type="button" className="underline" onClick={() => void reload()}>
-          Retry
-        </button>
-      </p>
+      <div className="flex min-h-[40vh] items-center justify-center">
+        <Loader2 className="size-8 animate-spin text-gray-400" aria-hidden />
+      </div>
     );
   }
 
-  if (!invoice) {
+  if (!officeId || !access?.visible) {
+    return (
+      <div className="space-y-4">
+        <SetupBackLink href="/invoices">
+          <ChevronLeft className="size-4" aria-hidden />
+          Back to invoices
+        </SetupBackLink>
+        <p className="text-sm text-gray-500">Invoices are not available for your account.</p>
+      </div>
+    );
+  }
+
+  if (!invoice || !documentData) {
     return (
       <div className="space-y-4">
         <SetupBackLink href="/invoices">
@@ -96,394 +144,440 @@ export default function InvoiceDetailPanel({ invoiceId }: { invoiceId: string })
   }
 
   const inv = invoice;
-  const status = computeDisplayStatus(inv);
-  const balance = inv.total - inv.amountPaid;
-  const days = daysUntilDue(inv.dueAt);
-  const canEditInvoice = status !== "PAID" && status !== "CANCELLED";
+  const balance = invoiceBalance(inv);
+  const isCreator =
+    Boolean(inv.createdBy?.id && me?.id) &&
+    inv.createdBy!.id.toLowerCase() === me!.id!.toLowerCase();
+  const canSend = access.canSend && inv.status === "DRAFT";
+  const canResend =
+    access.canSend &&
+    (inv.status === "SENT" ||
+      inv.status === "PARTIALLY_PAID" ||
+      inv.status === "PAID");
+  const canMarkPaid =
+    access.canMarkPaid &&
+    (inv.status === "SENT" || inv.status === "PARTIALLY_PAID");
+  const canVoid =
+    inv.status !== "PAID" &&
+    inv.status !== "PARTIALLY_PAID" &&
+    inv.status !== "VOID" &&
+    (isCreator || access.canSend);
 
-  function startEditing() {
-    setEditDraft({ ...inv });
-    setEditing(true);
-    setActionNote(null);
-  }
+  const pendingHint =
+    (inv.status === "SENT" || inv.status === "PARTIALLY_PAID") && !canMarkPaid
+      ? "You need Mark paid permission to record customer payments."
+      : null;
 
-  function cancelEditing() {
-    setEditDraft({ ...inv });
-    setEditing(false);
-  }
-
-  function saveEditing() {
-    if (!editDraft) return;
-    const saved = recalculateInvoice({
-      ...editDraft,
-      activities: [
-        {
-          id: `a-${Date.now()}`,
-          at: new Date().toISOString().slice(0, 10),
-          label: "Invoice updated",
-          detail: "Line items or terms edited",
-        },
-        ...editDraft.activities,
-      ],
-    });
-    setInvoice(saved);
-    setEditDraft(saved);
-    setEditing(false);
-    setActionNote("Invoice saved.");
-  }
+  const reminderEntries: ReminderEntry[] = (inv.reminders ?? []).map((r) => ({
+    id: r.id ?? `rem-${r.schedule}`,
+    schedule: r.schedule as ReminderSchedule,
+    at: r.customAt ?? undefined,
+    note: r.note ?? undefined,
+  }));
 
   async function runAction(
     label: string,
-    updater: (inv: InvoiceRecord) => InvoiceRecord
+    fn: () => Promise<OfficeInvoiceResponse>
   ) {
     setBusy(true);
-    await new Promise((r) => setTimeout(r, 600));
-    setInvoice((prev) => (prev ? updater(prev) : prev));
-    setActionNote(label);
-    setBusy(false);
-    setPaidModalOpen(false);
+    try {
+      setInvoice(await fn());
+      toast.showSuccess(label);
+    } catch (e) {
+      toast.showError(e instanceof Error ? e.message : "Action failed.");
+    } finally {
+      setBusy(false);
+    }
   }
 
-  function markPaid() {
-    void runAction("Invoice marked as paid.", (inv) => ({
-      ...inv,
-      status: "PAID",
-      amountPaid: inv.total,
-      paidAt: new Date().toISOString().slice(0, 10),
-      activities: [
-        {
-          id: `a-${Date.now()}`,
-          at: new Date().toISOString().slice(0, 10),
-          label: "Marked as paid",
-          detail: "Manual payment recorded",
-        },
-        ...inv.activities,
-      ],
-    }));
+  async function handleDownloadPdf() {
+    if (!officeId) return;
+    setDownloading(true);
+    try {
+      const blob = await downloadOfficeInvoicePdf(officeId, inv.id);
+      const safeName = inv.referenceNumber.replace(/[^a-zA-Z0-9._-]/g, "_");
+      downloadBlob(blob, `${safeName}.pdf`);
+      toast.showSuccess("Invoice PDF downloaded.");
+    } catch (e) {
+      toast.showError(e instanceof Error ? e.message : "Could not download PDF.");
+    } finally {
+      setDownloading(false);
+    }
   }
 
   return (
-    <div className="space-y-8">
-      <div className="flex flex-col gap-4 lg:flex-row lg:items-start lg:justify-between">
-        <div className="space-y-3">
-          <SetupBackLink href="/invoices">
-            <ChevronLeft className="size-4" aria-hidden />
-            Invoices
-          </SetupBackLink>
-          <div className="flex flex-wrap items-center gap-3">
-            <h1 className="font-mono text-2xl font-bold tracking-tight text-gray-900 dark:text-white">
-              {invoice.number}
-            </h1>
-            <InvoiceStatusBadge status={status} />
-          </div>
-          <div className="flex flex-wrap items-center gap-4 text-sm text-gray-600 dark:text-gray-400">
-            <span className="flex items-center gap-1.5">
-              <SetupAvatar name={invoice.customerName} size="xs" />
-              {invoice.customerName}
-            </span>
-            <span>·</span>
-            <span>{INVOICE_TYPE_LABELS[invoice.type]}</span>
-            <span>·</span>
-            <span className="font-semibold text-gray-900 dark:text-white">
-              {formatInvoiceAmount(invoice.currency, invoice.total)}
-            </span>
-          </div>
-        </div>
+    <div className="space-y-6">
+      <div className="flex flex-wrap items-center justify-between gap-x-4 gap-y-3">
+        <SetupBackLink href="/invoices">
+          <ChevronLeft className="size-4" aria-hidden />
+          Back to invoices
+        </SetupBackLink>
+        <InvoiceWorkflowStatusBar
+          status={inv.status}
+          className="w-full sm:ml-auto sm:w-auto"
+        />
+      </div>
 
+      <div className="flex flex-wrap items-start justify-between gap-4">
+        <div className="min-w-0 space-y-2">
+          <div className="flex flex-wrap items-center gap-3">
+            <h1 className="text-2xl font-bold text-gray-900 dark:text-white">
+              {inv.referenceNumber}
+            </h1>
+            <InvoiceStatusBadge status={inv.status} />
+          </div>
+          <p className="text-sm text-gray-600 dark:text-gray-400">
+            {inv.billToName} · {inv.billToEmail}
+          </p>
+          {inv.customerName ? (
+            <p className="text-sm text-gray-500">Customer · {inv.customerName}</p>
+          ) : null}
+        </div>
         <div className="flex flex-wrap gap-2">
-          {editing ? (
-            <>
-              <Button size="sm" onClick={saveEditing} disabled={busy}>
-                Save changes
-              </Button>
-              <Button size="sm" variant="outline" onClick={cancelEditing} disabled={busy}>
-                Cancel
-              </Button>
-            </>
-          ) : canEditInvoice ? (
-            <Button size="sm" variant="outline" onClick={startEditing} disabled={busy}>
-              <Pencil className="mr-1.5 size-4" aria-hidden />
-              Edit invoice
-            </Button>
-          ) : null}
-          {!editing && status !== "PAID" && status !== "CANCELLED" ? (
-            <>
-              <Button
-                size="sm"
-                onClick={() => setPaidModalOpen(true)}
-                disabled={busy}
-              >
-                <Banknote className="mr-1.5 size-4" aria-hidden />
-                Mark as paid
-              </Button>
-              <Button
-                size="sm"
-                variant="outline"
-                disabled={busy}
-                onClick={() =>
-                  void runAction("Renewal invoice draft created.", (inv) => ({
-                    ...inv,
-                    type: "RENEWAL",
-                    activities: [
-                      {
-                        id: `a-${Date.now()}`,
-                        at: new Date().toISOString().slice(0, 10),
-                        label: "Renewal initiated",
-                      },
-                      ...inv.activities,
-                    ],
-                  }))
-                }
-              >
-                <RotateCcw className="mr-1.5 size-4" aria-hidden />
-                Renew
-              </Button>
-              <Button
-                size="sm"
-                variant="outline"
-                disabled={busy}
-                onClick={() =>
-                  void runAction("Upgrade line items applied.", (inv) => ({
-                    ...inv,
-                    type: "UPGRADE",
-                    activities: [
-                      {
-                        id: `a-${Date.now()}`,
-                        at: new Date().toISOString().slice(0, 10),
-                        label: "Upgrade applied",
-                      },
-                      ...inv.activities,
-                    ],
-                  }))
-                }
-              >
-                <ArrowUpCircle className="mr-1.5 size-4" aria-hidden />
-                Upgrade
-              </Button>
-            </>
-          ) : null}
-          {!editing ? (
-            <Button size="sm" variant="outline" onClick={() => setResendOpen(true)}>
-              <Mail className="mr-1.5 size-4" aria-hidden />
-              Resend
-            </Button>
-          ) : null}
           <Button
             size="sm"
             variant="outline"
-            disabled={pdfBusy}
-            onClick={() => {
-              setPdfBusy(true);
-              void downloadInvoicePdf(inv, companyName ?? "Company")
-                .catch((err) =>
-                  alert(
-                    err instanceof Error
-                      ? err.message
-                      : "Could not download PDF."
-                  )
-                )
-                .finally(() => setPdfBusy(false));
-            }}
+            disabled={downloading || busy}
+            onClick={() => void handleDownloadPdf()}
           >
-            {pdfBusy ? (
+            {downloading ? (
               <Loader2 className="mr-1.5 size-4 animate-spin" aria-hidden />
             ) : (
               <Download className="mr-1.5 size-4" aria-hidden />
             )}
-            {pdfBusy ? "Preparing…" : "PDF"}
+            Download PDF
           </Button>
-          <Button
-            size="sm"
-            variant="outline"
-            onClick={() => router.push(`/invoices/create?from=${invoice.id}`)}
-          >
-            <Copy className="mr-1.5 size-4" aria-hidden />
-            Duplicate
-          </Button>
-          {status !== "CANCELLED" && status !== "PAID" ? (
+          {canSend ? (
+            <Button
+              size="sm"
+              disabled={busy}
+              onClick={() =>
+                void runAction("Invoice sent by email.", () =>
+                  sendOfficeInvoice(officeId!, inv.id)
+                )
+              }
+            >
+              <Send className="mr-1.5 size-4" aria-hidden />
+              Send email
+            </Button>
+          ) : null}
+          {canResend ? (
             <Button
               size="sm"
               variant="outline"
               disabled={busy}
               onClick={() =>
-                void runAction("Invoice cancelled.", (inv) => ({
-                  ...inv,
-                  status: "CANCELLED",
-                  activities: [
-                    {
-                      id: `a-${Date.now()}`,
-                      at: new Date().toISOString().slice(0, 10),
-                      label: "Invoice cancelled",
-                    },
-                    ...inv.activities,
-                  ],
-                }))
+                void runAction("Invoice resent by email.", () =>
+                  resendOfficeInvoice(officeId!, inv.id)
+                )
               }
             >
-              <XCircle className="mr-1.5 size-4" aria-hidden />
-              Cancel
+              <RotateCcw className="mr-1.5 size-4" aria-hidden />
+              Resend email
+            </Button>
+          ) : null}
+          {canMarkPaid ? (
+            <Button size="sm" disabled={busy} onClick={() => setMarkPaidOpen(true)}>
+              <Banknote className="mr-1.5 size-4" aria-hidden />
+              {inv.status === "PARTIALLY_PAID" ? "Record payment" : "Mark as paid"}
+            </Button>
+          ) : null}
+          {canVoid ? (
+            <Button
+              size="sm"
+              variant="outline"
+              disabled={busy}
+              onClick={() =>
+                void runAction("Invoice voided.", () =>
+                  voidOfficeInvoice(officeId!, inv.id)
+                )
+              }
+            >
+              <Ban className="mr-1.5 size-4" aria-hidden />
+              Void
             </Button>
           ) : null}
         </div>
       </div>
 
-      {actionNote ? (
-        <p className="rounded-lg border border-emerald-200 bg-emerald-50 px-4 py-2 text-sm text-emerald-800 dark:border-emerald-900 dark:bg-emerald-950/30 dark:text-emerald-300">
-          {actionNote}
+      {pendingHint ? (
+        <p className="rounded-lg border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-900 dark:border-amber-900 dark:bg-amber-950/30 dark:text-amber-200">
+          {pendingHint}
+        </p>
+      ) : inv.status === "PARTIALLY_PAID" ? (
+        <p className="rounded-lg border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-900 dark:border-amber-900 dark:bg-amber-950/30 dark:text-amber-200">
+          Partially paid — {formatInvoiceAmount(inv.currency, balance)} remaining of{" "}
+          {formatInvoiceAmount(inv.currency, inv.totalAmount)}.
         </p>
       ) : null}
 
-      <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 xl:grid-cols-4">
-        <SetupStatCard
-          icon={FileText}
-          label="Balance due"
-          value={
-            status === "PAID"
-              ? formatInvoiceAmount(invoice.currency, 0)
-              : formatInvoiceAmount(invoice.currency, balance)
-          }
-        />
-        <SetupStatCard
-          icon={Calendar}
-          label="Due date"
-          value={formatInvoiceDate(invoice.dueAt)}
-          hint={
-            status === "PAID"
-              ? "Paid"
-              : days < 0
-                ? `${Math.abs(days)} days overdue`
-                : days === 0
-                  ? "Due today"
-                  : `Due in ${days} days`
-          }
-        />
-        <SetupStatCard
-          icon={Banknote}
-          label="Amount paid"
-          value={formatInvoiceAmount(invoice.currency, invoice.amountPaid)}
-        />
-        <SetupStatCard
-          icon={RefreshCw}
-          label="Last sent"
-          value={
-            invoice.activities.find((a) => a.label.toLowerCase().includes("sent"))
-              ?.at
-              ? formatInvoiceDate(
-                  invoice.activities.find((a) =>
-                    a.label.toLowerCase().includes("sent")
-                  )!.at
-                )
-              : "—"
-          }
-        />
-      </div>
+      {(inv.status === "SENT" ||
+        inv.status === "PARTIALLY_PAID" ||
+        inv.status === "PAID") && (
+        <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
+          <SetupStatCard
+            icon={Wallet}
+            label="Invoice total"
+            value={formatInvoiceAmount(inv.currency, Number(inv.totalAmount))}
+          />
+          <SetupStatCard
+            icon={Banknote}
+            label="Paid"
+            value={formatInvoiceAmount(inv.currency, Number(inv.amountPaid))}
+          />
+          <SetupStatCard
+            icon={Banknote}
+            label="Remaining"
+            value={formatInvoiceAmount(inv.currency, balance)}
+          />
+          <SetupStatCard
+            icon={Calendar}
+            label="Due date"
+            value={formatInvoiceDate(inv.dueDate)}
+          />
+        </div>
+      )}
 
       <div className="grid grid-cols-1 gap-8 xl:grid-cols-12">
         <div className="xl:col-span-8">
-          {editing && editDraft ? (
-            <EditableInvoiceDocument
-              invoice={editDraft}
-              companyName={companyName}
-              onChange={setEditDraft}
-            />
-          ) : (
-            <InvoiceDocumentPreview invoice={invoice} companyName={companyName} />
-          )}
+          <InvoiceDocumentView data={documentData} variant="detail" />
         </div>
 
-        <div className="space-y-6 xl:col-span-4">
-          <SetupSectionCard title="Customer" icon={FileText}>
-            <div className="flex items-start gap-3">
-              <SetupAvatar name={invoice.customerName} />
-              <div className="min-w-0 space-y-2">
-                <p className="font-semibold text-gray-900 dark:text-white">
-                  {invoice.customerName}
-                </p>
-                <SetupContactLine icon={Mail} href={`mailto:${invoice.customerEmail}`}>
-                  {invoice.customerEmail}
-                </SetupContactLine>
-                <p className="text-xs leading-relaxed text-gray-500">
-                  {invoice.billingAddress}
-                </p>
-                <Link
-                  href={`/setup/customers/${invoice.customerId}`}
-                  className="text-xs font-medium text-brand-600 hover:underline"
-                >
-                  View customer profile →
-                </Link>
-              </div>
-            </div>
-          </SetupSectionCard>
-
-          <SetupSectionCard title="Payment details" icon={Banknote}>
-            <dl className="space-y-3 text-sm">
-              <div className="flex justify-between gap-2">
-                <dt className="text-gray-500">Method</dt>
-                <dd className="font-medium text-gray-900 dark:text-white">
-                  Bank transfer
-                </dd>
-              </div>
-              <div className="flex justify-between gap-2">
-                <dt className="text-gray-500">Reference</dt>
-                <dd className="font-mono text-xs">{invoice.number}</dd>
-              </div>
-              {invoice.paidAt ? (
-                <div className="flex justify-between gap-2">
-                  <dt className="text-gray-500">Paid on</dt>
-                  <dd>{formatInvoiceDate(invoice.paidAt)}</dd>
-                </div>
-              ) : null}
-            </dl>
-          </SetupSectionCard>
-
-          <SetupSectionCard title="Activity" icon={History}>
-            <ul className="space-y-4">
-              {invoice.activities.map((a) => (
-                <li key={a.id} className="relative border-l-2 border-gray-200 pl-4 dark:border-gray-700">
-                  <span className="absolute -left-[5px] top-1.5 size-2 rounded-full bg-gray-400" />
-                  <p className="text-sm font-medium text-gray-900 dark:text-white">
-                    {a.label}
+        <div className="space-y-4 xl:col-span-4">
+          <SetupSectionCard title="Activity">
+            <ul className="space-y-4 text-sm">
+              <li className="flex gap-3">
+                <User className="mt-0.5 size-4 shrink-0 text-gray-400" aria-hidden />
+                <div>
+                  <p className="font-medium text-gray-900 dark:text-white">Created</p>
+                  <p className="text-gray-500">
+                    {inv.createdBy?.fullName ?? "—"} ·{" "}
+                    {formatInvoiceDate(inv.createdAt)}
                   </p>
-                  <p className="text-xs text-gray-500">{formatInvoiceDate(a.at)}</p>
-                  {a.detail ? (
-                    <p className="mt-0.5 text-xs text-gray-500">{a.detail}</p>
-                  ) : null}
+                </div>
+              </li>
+              {inv.sentAt ? (
+                <li className="flex gap-3">
+                  <Mail className="mt-0.5 size-4 shrink-0 text-gray-400" aria-hidden />
+                  <div>
+                    <p className="font-medium text-gray-900 dark:text-white">Sent</p>
+                    <p className="text-gray-500">
+                      {inv.sentBy?.fullName ?? "—"} · {formatInvoiceDate(inv.sentAt)}
+                    </p>
+                  </div>
                 </li>
-              ))}
+              ) : null}
+              {inv.paidAt ? (
+                <li className="flex gap-3">
+                  <CheckCircle2
+                    className="mt-0.5 size-4 shrink-0 text-emerald-500"
+                    aria-hidden
+                  />
+                  <div>
+                    <p className="font-medium text-gray-900 dark:text-white">
+                      {inv.status === "PAID" ? "Fully paid" : "Last payment"}
+                    </p>
+                    <p className="text-gray-500">
+                      {inv.paidBy?.fullName ?? "—"} · {formatInvoiceDate(inv.paidAt)}
+                    </p>
+                  </div>
+                </li>
+              ) : null}
+              <li className="flex gap-3">
+                <Calendar className="mt-0.5 size-4 shrink-0 text-gray-400" aria-hidden />
+                <div>
+                  <p className="font-medium text-gray-900 dark:text-white">Due</p>
+                  <p className="text-gray-500">{formatInvoiceDate(inv.dueDate)}</p>
+                </div>
+              </li>
             </ul>
           </SetupSectionCard>
+
+          {(inv.reminders ?? []).length > 0 ? (
+            <SetupSectionCard title="Payment reminders">
+              <p className="mb-3 text-xs text-gray-500">
+                Scheduled emails while this invoice is unpaid (after send).
+              </p>
+              <ReminderList
+                reminders={reminderEntries}
+                referenceDate={inv.dueDate}
+                referenceKind="due"
+              />
+            </SetupSectionCard>
+          ) : null}
         </div>
       </div>
 
-      <ResendInvoiceModal
-        invoice={invoice}
-        isOpen={resendOpen}
-        onClose={() => setResendOpen(false)}
-        onSent={() => {
-          setActionNote(`Invoice resent to ${invoice.customerEmail}.`);
-          refresh();
+      {(inv.payments ?? []).length > 0 ? (
+        <SetupSectionCard title="Customer payments">
+          <div className="overflow-x-auto">
+            <table className="w-full min-w-[28rem] text-left text-sm">
+              <thead>
+                <tr className="border-b border-gray-200 text-xs font-medium uppercase tracking-wide text-gray-500 dark:border-gray-700">
+                  <th className="pb-2 pr-4">Date</th>
+                  <th className="pb-2 pr-4">Amount</th>
+                  <th className="pb-2 pr-4">Recorded by</th>
+                  <th className="pb-2">Note</th>
+                </tr>
+              </thead>
+              <tbody>
+                {inv.payments!.map((row) => (
+                  <tr
+                    key={row.id}
+                    className="border-b border-gray-100 last:border-0 dark:border-gray-800"
+                  >
+                    <td className="py-2.5 pr-4 text-gray-900 dark:text-white">
+                      {formatInvoiceDate(row.paidAt)}
+                    </td>
+                    <td className="py-2.5 pr-4 font-medium text-gray-900 dark:text-white">
+                      {formatInvoiceAmount(inv.currency, Number(row.amount))}
+                    </td>
+                    <td className="py-2.5 pr-4 text-gray-600 dark:text-gray-400">
+                      {row.recordedBy?.fullName ?? "—"}
+                    </td>
+                    <td className="py-2.5 text-gray-600 dark:text-gray-400">
+                      {row.note ?? "—"}
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        </SetupSectionCard>
+      ) : null}
+
+      <MarkInvoicePaidModal
+        open={markPaidOpen}
+        invoice={inv}
+        officeId={officeId}
+        onClose={() => setMarkPaidOpen(false)}
+        onSaved={(updated) => {
+          setInvoice(updated);
+          setMarkPaidOpen(false);
+          toast.showSuccess(
+            updated.status === "PAID"
+              ? "Invoice fully paid."
+              : "Partial payment recorded."
+          );
         }}
       />
+    </div>
+  );
+}
 
-      <Modal isOpen={paidModalOpen} onClose={() => setPaidModalOpen(false)} className="max-w-md p-6">
-        <h3 className="text-lg font-semibold text-gray-900 dark:text-white">
-          Mark as paid?
-        </h3>
-        <p className="mt-2 text-sm text-gray-600 dark:text-gray-400">
-          Record full payment of{" "}
-          <strong>{formatInvoiceAmount(invoice.currency, balance)}</strong> for{" "}
-          {invoice.number}.
-        </p>
-        <div className="mt-6 flex justify-end gap-2">
-          <Button variant="outline" onClick={() => setPaidModalOpen(false)} disabled={busy}>
+function MarkInvoicePaidModal({
+  open,
+  invoice,
+  officeId,
+  onClose,
+  onSaved,
+}: {
+  open: boolean;
+  invoice: OfficeInvoiceResponse;
+  officeId: string;
+  onClose: () => void;
+  onSaved: (inv: OfficeInvoiceResponse) => void;
+}) {
+  const toast = useToast();
+  const balance = invoiceBalance(invoice);
+  const [amount, setAmount] = useState("");
+  const [paidAt, setPaidAt] = useState("");
+  const [note, setNote] = useState("");
+  const [saving, setSaving] = useState(false);
+
+  useEffect(() => {
+    if (open) {
+      setAmount(String(balance));
+      setPaidAt(new Date().toISOString().slice(0, 10));
+      setNote("");
+    }
+  }, [open, balance]);
+
+  async function submit() {
+    const payAmount = Number(amount.replace(/,/g, ""));
+    if (!payAmount || payAmount <= 0) {
+      toast.showError("Enter a valid payment amount.");
+      return;
+    }
+    if (payAmount > balance) {
+      toast.showError(
+        `Amount cannot exceed the remaining balance (${formatInvoiceAmount(invoice.currency, balance)}).`
+      );
+      return;
+    }
+    const body: MarkInvoicePaidRequest = {
+      amount: payAmount,
+      note: note.trim() || undefined,
+    };
+    if (paidAt.trim()) {
+      body.paidAt = paidAt.trim();
+    }
+    setSaving(true);
+    try {
+      const updated = await markOfficeInvoicePaid(officeId, invoice.id, body);
+      onSaved(updated);
+    } catch (e) {
+      toast.showError(e instanceof Error ? e.message : "Could not record payment.");
+      setSaving(false);
+    }
+  }
+
+  return (
+    <Modal isOpen={open} onClose={onClose} className="max-w-md p-6">
+      <h2 className="text-lg font-semibold text-gray-900 dark:text-white">
+        Record customer payment
+      </h2>
+      <p className="mt-1 text-sm text-gray-500">
+        {invoice.billToName} · {invoice.referenceNumber}
+      </p>
+      <p className="mt-2 text-sm font-medium text-gray-800 dark:text-gray-200">
+        Remaining balance: {formatInvoiceAmount(invoice.currency, balance)}
+      </p>
+      <div className="mt-4 space-y-4">
+        <div>
+          <Label>Amount received ({invoice.currency}) *</Label>
+          <Input
+            type="number"
+            min="0"
+            step={0.01}
+            value={amount}
+            onChange={(e) => setAmount(e.target.value)}
+            className="mt-1.5"
+          />
+          <p className="mt-1 text-xs text-gray-500">
+            Defaults to the full balance. Enter less for a partial payment.
+          </p>
+        </div>
+        <div>
+          <Label>Payment date</Label>
+          <Input
+            type="date"
+            value={paidAt}
+            onChange={(e) => setPaidAt(e.target.value)}
+            className="mt-1.5"
+          />
+        </div>
+        <div>
+          <Label>Note</Label>
+          <Input
+            value={note}
+            onChange={(e) => setNote(e.target.value)}
+            placeholder="Bank ref, receipt no."
+            className="mt-1.5"
+          />
+        </div>
+        <div className="flex justify-end gap-2">
+          <Button variant="outline" onClick={onClose}>
             Cancel
           </Button>
-          <Button onClick={() => markPaid()} disabled={busy}>
-            {busy ? <Loader2 className="mr-1.5 size-4 animate-spin" /> : null}
+          <Button disabled={saving} onClick={() => void submit()}>
+            {saving ? (
+              <Loader2 className="mr-2 size-4 animate-spin" aria-hidden />
+            ) : null}
             Confirm payment
           </Button>
         </div>
-      </Modal>
-    </div>
+      </div>
+    </Modal>
   );
 }

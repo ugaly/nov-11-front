@@ -7,12 +7,14 @@ import {
   getWorkItemFieldTemplate,
   postWorkItemFieldFile,
   postWorkItemFormLink,
+  postUseDefaultWorkItemFieldTemplate,
   patchWorkItemSubmissionControls,
   patchWorkItemFieldValues,
   putWorkItemFieldTemplate,
 } from "@/api/work-item/work-item.api";
 import type {
   PatchWorkItemSubmissionControlsRequest,
+  WorkItemActivityLogDto,
   WorkItemFormLinkSummaryDto,
 } from "@/api/types/work-item-api";
 import {
@@ -47,7 +49,8 @@ function normalizeAttachments(values: WorkItemFieldValue[]): WorkItemFieldValue[
 export function useWorkItemFieldState(
   companyId: string | null,
   engagementId: string,
-  workItemId: string
+  workItemId: string,
+  periodId?: string | null
 ) {
   const [fields, setFields] = useState<WorkItemFieldDefinition[]>([]);
   const [configuredAt, setConfiguredAt] = useState<string | null>(null);
@@ -65,6 +68,7 @@ export function useWorkItemFieldState(
     submittedAt: string | null;
     status: import("@/api/types/template-config").WorkItemStatus | null;
   }>({ remark: null, submittedAt: null, status: null });
+  const [activityLogs, setActivityLogs] = useState<WorkItemActivityLogDto[]>([]);
   const [hydrated, setHydrated] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
@@ -75,7 +79,8 @@ export function useWorkItemFieldState(
       const bundle = await getWorkItemExecution(
         companyId,
         engagementId,
-        workItemId
+        workItemId,
+        periodId
       );
       const template = bundle.template;
       setFields(template?.fields ?? []);
@@ -97,6 +102,7 @@ export function useWorkItemFieldState(
         submittedAt: bundle.closure?.submittedAt ?? null,
         status: bundle.closure?.status ?? null,
       });
+      setActivityLogs(bundle.activityLogs ?? []);
     } catch (err) {
       setError(getApiErrorMessage(err, "Could not load task fields."));
       setFields([]);
@@ -104,10 +110,11 @@ export function useWorkItemFieldState(
       setValues([]);
       setSavedAt(null);
       setFormLink(null);
+      setActivityLogs([]);
     } finally {
       setHydrated(true);
     }
-  }, [companyId, engagementId, workItemId]);
+  }, [companyId, engagementId, workItemId, periodId]);
 
   useEffect(() => {
     setHydrated(false);
@@ -127,7 +134,8 @@ export function useWorkItemFieldState(
           const current = await getWorkItemFieldTemplate(
             companyId,
             engagementId,
-            workItemId
+            workItemId,
+            periodId
           );
           serverFields = current.fields ?? [];
         } catch (fetchErr) {
@@ -164,7 +172,8 @@ export function useWorkItemFieldState(
           companyId,
           engagementId,
           workItemId,
-          { fields: fieldsForApi }
+          { fields: fieldsForApi },
+          periodId
         );
         setFields(res.fields);
         setConfiguredAt(res.configuredAt);
@@ -185,8 +194,30 @@ export function useWorkItemFieldState(
         throw err;
       }
     },
-    [companyId, engagementId, workItemId, reload]
+    [companyId, engagementId, workItemId, periodId, reload]
   );
+
+  const applyDefaultTemplate = useCallback(async () => {
+    if (!companyId) return;
+    setError(null);
+    try {
+      const res = await postUseDefaultWorkItemFieldTemplate(
+        companyId,
+        engagementId,
+        workItemId,
+        periodId
+      );
+      setFields(res.fields);
+      setConfiguredAt(res.configuredAt);
+      if (res.formLink) setFormLink(res.formLink);
+      await reload();
+    } catch (err) {
+      setError(
+        getApiErrorMessage(err, "No default form found yet. Configure one manually.")
+      );
+      throw err;
+    }
+  }, [companyId, engagementId, workItemId, periodId, reload]);
 
   const persistValues = useCallback(
     async (next: WorkItemFieldValue[], options?: { force?: boolean }) => {
@@ -206,7 +237,8 @@ export function useWorkItemFieldState(
           companyId,
           engagementId,
           workItemId,
-          { values: valuesForApi, force: options?.force }
+          { values: valuesForApi, force: options?.force },
+          periodId
         );
         setValues(normalizeAttachments(res.values));
         setSavedAt(res.savedAt);
@@ -233,7 +265,7 @@ export function useWorkItemFieldState(
         throw err;
       }
     },
-    [companyId, engagementId, workItemId, fields]
+    [companyId, engagementId, workItemId, periodId, fields]
   );
 
   const uploadFieldFile = useCallback(
@@ -244,11 +276,12 @@ export function useWorkItemFieldState(
         engagementId,
         workItemId,
         fieldId,
-        file
+        file,
+        periodId
       );
       return apiFileToAttachment(dto);
     },
-    [companyId, engagementId, workItemId]
+    [companyId, engagementId, workItemId, periodId]
   );
 
   const ensureFormLink = useCallback(async () => {
@@ -258,7 +291,10 @@ export function useWorkItemFieldState(
         companyId,
         engagementId,
         workItemId,
-        { regenerateToken: false }
+        {
+          regenerateToken: false,
+          ...(periodId ? { engagementPeriodId: periodId } : {}),
+        }
       );
       const summary: WorkItemFormLinkSummaryDto = {
         url: link.url,
@@ -275,7 +311,7 @@ export function useWorkItemFieldState(
       setError(getApiErrorMessage(err, "Could not create form link."));
       return null;
     }
-  }, [companyId, engagementId, workItemId]);
+  }, [companyId, engagementId, workItemId, periodId]);
 
   const patchSubmissionControls = useCallback(
     async (patch: PatchWorkItemSubmissionControlsRequest) => {
@@ -287,7 +323,8 @@ export function useWorkItemFieldState(
           companyId,
           engagementId,
           workItemId,
-          patch
+          patch,
+          periodId
         );
         setResponsesLocked(res.responsesLocked);
         setInternalEditEnabled(res.internalEditEnabled);
@@ -302,7 +339,7 @@ export function useWorkItemFieldState(
         setControlsSaving(false);
       }
     },
-    [companyId, engagementId, workItemId, reload]
+    [companyId, engagementId, workItemId, periodId, reload]
   );
 
   const staffEditLocked = isStaffFieldEditLocked({
@@ -327,10 +364,12 @@ export function useWorkItemFieldState(
     formLinkUrl: formLink?.url ?? null,
     error,
     persistTemplate,
+    applyDefaultTemplate,
     persistValues,
     uploadFieldFile,
     ensureFormLink,
     reload,
     closureInitial,
+    activityLogs,
   };
 }

@@ -5,7 +5,8 @@ import {
   listEngagements,
   listServiceCategories,
 } from "@/api/template-config/template-config.api";
-import { DUMMY_INVOICES } from "@/lib/invoices/invoice-dummy-data";
+import { listOfficeInvoices } from "@/api/invoice/invoice.api";
+import { getStoredUser } from "@/lib/auth-storage";
 import { dashboardInvoiceCounts } from "@/lib/invoices/invoice-utils";
 import type { CustomerEngagementResponse } from "@/api/types/template-config";
 import type { DashboardPeriod } from "@/lib/dashboard-period";
@@ -147,10 +148,8 @@ export function useDashboardData(
   const [engagements, setEngagements] = useState<CustomerEngagementResponse[]>(
     []
   );
-
-  const invoiceCounts = useMemo(
-    () => dashboardInvoiceCounts(DUMMY_INVOICES),
-    []
+  const [invoiceCounts, setInvoiceCounts] = useState(() =>
+    dashboardInvoiceCounts([])
   );
 
   const reload = useCallback(async () => {
@@ -158,10 +157,17 @@ export function useDashboardData(
     setLoading(true);
     setError(null);
     try {
-      const [customerPage, engagementList] = await Promise.all([
+      const officeId = getStoredUser()?.officeId ?? null;
+      const [customerPage, engagementList, invoices] = await Promise.all([
         listCustomersPaginated(companyId, { page: 0, size: 200 }),
         listEngagements(companyId),
+        officeId
+          ? listOfficeInvoices(officeId).catch(() => [] as Awaited<
+              ReturnType<typeof listOfficeInvoices>
+            >)
+          : Promise.resolve([]),
       ]);
+      setInvoiceCounts(dashboardInvoiceCounts(invoices));
 
       setTotalCustomers(customerPage.totalElements);
       const active = customerPage.content.filter((c) => c.active).length;

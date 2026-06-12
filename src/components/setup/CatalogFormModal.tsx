@@ -11,17 +11,11 @@ import type {
 } from "@/api/types/template-config";
 import PricingFields from "@/components/setup/PricingFields";
 import { setupFormModalClass } from "@/components/setup/setupFormModal";
-import RecurrenceFields from "@/components/setup/RecurrenceFields";
 import Button from "@/components/ui/button/Button";
 import Input from "@/components/form/input/InputField";
 import Label from "@/components/form/Label";
 import { Modal } from "@/components/ui/modal";
 import { useTemplateOptions } from "@/hooks/useTemplateOptions";
-import {
-  appendRecurrenceFields,
-  emptyRecurrenceForm,
-  type RecurrenceFormState,
-} from "@/lib/template-recurrence";
 import {
   appendPricingFields,
   emptyPricingForm,
@@ -46,17 +40,13 @@ export default function CatalogFormModal({
   onClose: () => void;
   onCreated: () => void;
 }) {
-  const { currencies, timelineUnits, recurrenceTypes } =
-    useTemplateOptions(companyId);
+  const { currencies, timelineUnits } = useTemplateOptions(companyId);
   const [categories, setCategories] = useState<ServiceCategoryResponse[]>([]);
   const [categoryId, setCategoryId] = useState("");
   const [name, setName] = useState("");
   const [description, setDescription] = useState("");
   const [sortOrder, setSortOrder] = useState("1");
   const [pricing, setPricing] = useState<PricingFormState>(emptyPricingForm);
-  const [recurrence, setRecurrence] = useState<RecurrenceFormState>(
-    emptyRecurrenceForm
-  );
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
@@ -81,7 +71,6 @@ export default function CatalogFormModal({
       setDescription("");
       setSortOrder("1");
       setPricing(emptyPricingForm());
-      setRecurrence(emptyRecurrenceForm());
       setError(null);
       if (fixedCategoryId) setCategoryId(fixedCategoryId);
     }
@@ -98,24 +87,14 @@ export default function CatalogFormModal({
       setError("Service category is required.");
       return;
     }
-    if (
-      recurrence.recurrenceType === "CUSTOM" &&
-      !recurrence.recurrenceIntervalValue.trim()
-    ) {
-      setError("Custom recurrence requires an interval value.");
-      return;
-    }
-    const body = appendRecurrenceFields(
-      appendPricingFields<CreateServiceCatalogRequest>(
-        {
-          name: trimmed,
-          description: description.trim() || undefined,
-          sortOrder: Number.parseInt(sortOrder, 10) || undefined,
-          recurrenceType: recurrence.recurrenceType,
-        },
-        pricing
-      ),
-      recurrence
+    const body = appendPricingFields<CreateServiceCatalogRequest>(
+      {
+        name: trimmed,
+        description: description.trim() || undefined,
+        sortOrder: Number.parseInt(sortOrder, 10) || undefined,
+        recurrenceType: "ONE_OFF",
+      },
+      pricing
     );
     setSubmitting(true);
     setError(null);
@@ -133,7 +112,8 @@ export default function CatalogFormModal({
     <Modal isOpen={open} onClose={onClose} className={setupFormModalClass}>
       <h3 className="text-lg font-semibold">New service catalog</h3>
       <p className="mt-1 text-xs text-gray-500">
-        Code is generated automatically from the name.
+        Code is generated automatically from the name. Configure recurrence on
+        each root GROUP node after adding structure.
       </p>
       <form className="mt-4 space-y-4" onSubmit={(e) => void handleSubmit(e)}>
         {error ? <p className="text-sm text-error-600">{error}</p> : null}
@@ -171,11 +151,6 @@ export default function CatalogFormModal({
             onChange={(e) => setSortOrder(e.target.value)}
           />
         </div>
-        <RecurrenceFields
-          value={recurrence}
-          onChange={setRecurrence}
-          recurrenceTypes={recurrenceTypes}
-        />
         <PricingFields
           value={pricing}
           onChange={setPricing}

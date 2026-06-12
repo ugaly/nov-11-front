@@ -24,6 +24,7 @@ export function useWorkItemClosure(
   workItemId: string,
   currentStatus: WorkItemStatus,
   companyId: string | null,
+  periodId?: string | null,
   options: {
     initialClosure?: {
       remark: string | null;
@@ -61,6 +62,7 @@ export function useWorkItemClosure(
   }, [
     workItemId,
     engagementId,
+    periodId,
     options.initialClosure?.remark,
     options.initialClosure?.submittedAt,
     options.initialClosure?.status,
@@ -119,7 +121,8 @@ export function useWorkItemClosure(
             remark: remark.trim(),
             values,
             outputFileIds,
-          }
+          },
+          periodId
         );
         const trimmed = remark.trim();
         setClosure({
@@ -133,14 +136,20 @@ export function useWorkItemClosure(
         throw err;
       }
     },
-    [companyId, engagementId, workItemId, options]
+    [companyId, engagementId, workItemId, periodId, options]
   );
 
   const reopenClosure = useCallback(async () => {
     if (!companyId) return;
     setError(null);
     try {
-      await postWorkItemClosureReopen(companyId, engagementId, workItemId, {});
+      await postWorkItemClosureReopen(
+        companyId,
+        engagementId,
+        workItemId,
+        {},
+        periodId
+      );
       setClosure({
         remark: closure.remark,
         submittedAt: null,
@@ -151,7 +160,7 @@ export function useWorkItemClosure(
       setError(getApiErrorMessage(err, "Could not reopen closure."));
       throw err;
     }
-  }, [closure.remark, companyId, engagementId, options, workItemId]);
+  }, [closure.remark, companyId, engagementId, options, periodId, workItemId]);
 
   return {
     closure,

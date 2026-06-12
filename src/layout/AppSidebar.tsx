@@ -1,5 +1,5 @@
 "use client";
-import React, { useEffect, useRef, useState,useCallback } from "react";
+import React, { useEffect, useRef, useState, useCallback, useMemo } from "react";
 import Link from "next/link";
 import { usePathname } from "next/navigation";
 import { useSidebar } from "../context/SidebarContext";
@@ -8,6 +8,7 @@ import {
   CalenderIcon,
   ChevronDownIcon,
   DollarLineIcon,
+  FolderIcon,
   GridIcon,
   GroupIcon,
   HorizontaLDots,
@@ -20,6 +21,10 @@ import {
 } from "../icons/index";
 
 import { APP_LOGO_SRC } from "@/lib/brand-logo";
+import { useExpenseAccess } from "@/lib/expenses/use-expense-access";
+import { useInvoiceAccess } from "@/lib/invoices/use-invoice-access";
+import { usePaymentAccess } from "@/lib/payments/use-payment-access";
+import { isAdminUser } from "@/lib/is-admin";
 
 type NavItem = {
   name: string;
@@ -28,7 +33,7 @@ type NavItem = {
   subItems?: { name: string; path: string; pro?: boolean; new?: boolean }[];
 };
 
-const navItems: NavItem[] = [
+const baseNavItems: NavItem[] = [
   {
     icon: <GridIcon />,
     name: "Dashboard",
@@ -69,6 +74,16 @@ const navItems: NavItem[] = [
     name: "User Profile",
     path: "/profile",
   },
+  {
+    icon: <BoxCubeIcon />,
+    name: "Company Profile",
+    path: "/company",
+  },
+  {
+    icon: <FolderIcon />,
+    name: "Company Files",
+    path: "/company/files",
+  },
 
   // {
   //   name: "Forms",
@@ -90,49 +105,171 @@ const navItems: NavItem[] = [
   // },
 ];
 
-const othersItems: NavItem[] = [
-  {
-    icon: <PlugInIcon />,
-    name: "Setup",
-    subItems: [
-      { name: "Service categories", path: "/setup/service-categories" },
-      { name: "All catalogs", path: "/setup/service-catalogs" },
-      { name: "Engagements", path: "/setup/engagements" },
-    ],
-  },
-  // {
-  //   icon: <PieChartIcon />,
-  //   name: "Charts",
-  //   subItems: [
-  //     { name: "Line Chart", path: "/line-chart", pro: false },
-  //     { name: "Bar Chart", path: "/bar-chart", pro: false },
-  //   ],
-  // },
-  // {
-  //   icon: <BoxCubeIcon />,
-  //   name: "UI Elements",
-  //   subItems: [
-  //     { name: "Alerts", path: "/alerts", pro: false },
-  //     { name: "Avatar", path: "/avatars", pro: false },
-  //     { name: "Badge", path: "/badge", pro: false },
-  //     { name: "Buttons", path: "/buttons", pro: false },
-  //     { name: "Images", path: "/images", pro: false },
-  //     { name: "Videos", path: "/videos", pro: false },
-  //   ],
-  // },
-  // {
-  //   icon: <PlugInIcon />,
-  //   name: "Authentication",
-  //   subItems: [
-  //     { name: "Sign In", path: "/signin", pro: false },
-  //     { name: "Sign Up", path: "/signup", pro: false },
-  //   ],
-  // },
-];
+function buildOthersItems(showOfficePermissions: boolean): NavItem[] {
+  const setupSubItems = [
+    { name: "Service categories", path: "/setup/service-categories" },
+    { name: "All catalogs", path: "/setup/service-catalogs" },
+    { name: "Engagements", path: "/setup/engagements" },
+  ];
+  setupSubItems.push(
+    { name: "Payment categories", path: "/setup/payment-categories" },
+    { name: "Payment methods", path: "/setup/payment-methods" },
+    { name: "Partial payment reminders", path: "/setup/payment-partial-reminders" },
+    { name: "Expense types", path: "/setup/expense-types" },
+    { name: "Expense reminders", path: "/setup/expense-reminders" }
+  );
+  if (showOfficePermissions) {
+    setupSubItems.push({
+      name: "Office permissions",
+      path: "/setup/payment-permissions",
+    });
+  }
+  return [
+    {
+      icon: <PlugInIcon />,
+      name: "Setup",
+      subItems: setupSubItems,
+    },
+  ];
+}
 
 const AppSidebar: React.FC = () => {
   const { isExpanded, isMobileOpen, isHovered, setIsHovered } = useSidebar();
   const pathname = usePathname();
+  const { access: paymentAccess, loading: paymentAccessLoading } =
+    usePaymentAccess();
+  const { access: expenseAccess, loading: expenseAccessLoading } =
+    useExpenseAccess();
+  const { access: invoiceAccess, loading: invoiceAccessLoading } =
+    useInvoiceAccess();
+  const accessLoading =
+    paymentAccessLoading || expenseAccessLoading || invoiceAccessLoading;
+  const showPayments =
+    isAdminUser() || (!accessLoading && Boolean(paymentAccess?.visible));
+  const showExpenses =
+    isAdminUser() || (!accessLoading && Boolean(expenseAccess?.visible));
+  const showInvoices =
+    isAdminUser() || (!accessLoading && Boolean(invoiceAccess?.visible));
+  const showOfficePermissions =
+    isAdminUser() ||
+    (!accessLoading &&
+      Boolean(
+        paymentAccess?.canManagePermissions ||
+          expenseAccess?.canManagePermissions ||
+          invoiceAccess?.canManagePermissions
+      ));
+  const navItems = useMemo(
+    () =>
+      baseNavItems.filter((item) => {
+        if (item.path === "/payments") return showPayments;
+        if (item.path === "/expenses") return showExpenses;
+        if (item.path === "/invoices") return showInvoices;
+        return true;
+      }),
+    [showPayments, showExpenses, showInvoices]
+  );
+  const othersItems = useMemo(
+    () => buildOthersItems(showOfficePermissions),
+    [showOfficePermissions]
+  );
+
+  const sidebarLabelsVisible = isExpanded || isHovered || isMobileOpen;
+
+  const allNavPaths = useMemo(() => {
+    const paths: string[] = [];
+    for (const item of [...navItems, ...othersItems]) {
+      if (item.path) paths.push(item.path);
+      item.subItems?.forEach((sub) => paths.push(sub.path));
+    }
+    return paths.sort((a, b) => b.length - a.length);
+  }, [navItems, othersItems]);
+
+  const [openSubmenu, setOpenSubmenu] = useState<{
+    type: "main" | "others";
+    index: number;
+  } | null>(null);
+  const [subMenuHeight, setSubMenuHeight] = useState<Record<string, number>>(
+    {}
+  );
+  const subMenuRefs = useRef<Record<string, HTMLDivElement | null>>({});
+  const prevPathnameRef = useRef(pathname);
+
+  const isActive = useCallback(
+    (path: string) => {
+      const bestMatch = allNavPaths.find(
+        (candidate) =>
+          pathname === candidate || pathname.startsWith(`${candidate}/`)
+      );
+      return bestMatch === path;
+    },
+    [pathname, allNavPaths]
+  );
+
+  const handleSubmenuToggle = (index: number, menuType: "main" | "others") => {
+    if (!sidebarLabelsVisible) return;
+    setOpenSubmenu((prevOpenSubmenu) => {
+      if (
+        prevOpenSubmenu &&
+        prevOpenSubmenu.type === menuType &&
+        prevOpenSubmenu.index === index
+      ) {
+        return null;
+      }
+      return { type: menuType, index };
+    });
+  };
+
+  // Close Setup submenu when sidebar collapses to icon-only mode
+  useEffect(() => {
+    if (!sidebarLabelsVisible) {
+      setOpenSubmenu(null);
+    }
+  }, [sidebarLabelsVisible]);
+
+  useEffect(() => {
+    if (!sidebarLabelsVisible) return;
+
+    let match: { type: "main" | "others"; index: number } | null = null;
+    (["main", "others"] as const).forEach((menuType) => {
+      const items = menuType === "main" ? navItems : othersItems;
+      items.forEach((nav, index) => {
+        if (!nav.subItems) return;
+        for (const subItem of nav.subItems) {
+          if (isActive(subItem.path)) {
+            match = { type: menuType, index };
+          }
+        }
+      });
+    });
+
+    if (match) {
+      setOpenSubmenu((prev) =>
+        prev?.type === match!.type && prev?.index === match!.index ? prev : match
+      );
+    } else {
+      const prev = prevPathnameRef.current;
+      if (prev.startsWith("/setup/") && !pathname.startsWith("/setup/")) {
+        setOpenSubmenu((open) => (open?.type === "others" ? null : open));
+      }
+    }
+    prevPathnameRef.current = pathname;
+  }, [pathname, isActive, navItems, othersItems, sidebarLabelsVisible]);
+
+  useEffect(() => {
+    if (openSubmenu === null || !sidebarLabelsVisible) return;
+    const key = `${openSubmenu.type}-${openSubmenu.index}`;
+    const measure = () => {
+      const el = subMenuRefs.current[key];
+      if (!el) return;
+      const next = el.scrollHeight;
+      setSubMenuHeight((prev) =>
+        prev[key] === next ? prev : { ...prev, [key]: next }
+      );
+    };
+    measure();
+    const id = requestAnimationFrame(measure);
+    return () => cancelAnimationFrame(id);
+  }, [openSubmenu, sidebarLabelsVisible]);
 
   const renderMenuItems = (
     navItems: NavItem[],
@@ -140,7 +277,7 @@ const AppSidebar: React.FC = () => {
   ) => (
     <ul className="flex flex-col gap-4">
       {navItems.map((nav, index) => (
-        <li key={nav.name}>
+        <li key={nav.name} className={nav.subItems ? "relative z-[1]" : undefined}>
           {nav.subItems ? (
             <button
               onClick={() => handleSubmenuToggle(index, menuType)}
@@ -149,7 +286,7 @@ const AppSidebar: React.FC = () => {
                   ? "menu-item-active"
                   : "menu-item-inactive"
               } cursor-pointer ${
-                !isExpanded && !isHovered
+                !sidebarLabelsVisible
                   ? "lg:justify-center"
                   : "lg:justify-start"
               }`}
@@ -163,10 +300,10 @@ const AppSidebar: React.FC = () => {
               >
                 {nav.icon}
               </span>
-              {(isExpanded || isHovered || isMobileOpen) && (
+              {(sidebarLabelsVisible) && (
                 <span className={`menu-item-text`}>{nav.name}</span>
               )}
-              {(isExpanded || isHovered || isMobileOpen) && (
+              {sidebarLabelsVisible && (
                 <ChevronDownIcon
                   className={`ml-auto w-5 h-5 transition-transform duration-200 ${
                     openSubmenu?.type === menuType &&
@@ -194,13 +331,13 @@ const AppSidebar: React.FC = () => {
                 >
                   {nav.icon}
                 </span>
-                {(isExpanded || isHovered || isMobileOpen) && (
+                {(sidebarLabelsVisible) && (
                   <span className={`menu-item-text`}>{nav.name}</span>
                 )}
               </Link>
             )
           )}
-          {nav.subItems && (isExpanded || isHovered || isMobileOpen) && (
+          {nav.subItems && sidebarLabelsVisible && (
             <div
               ref={(el) => {
                 subMenuRefs.current[`${menuType}-${index}`] = el;
@@ -209,7 +346,7 @@ const AppSidebar: React.FC = () => {
               style={{
                 height:
                   openSubmenu?.type === menuType && openSubmenu?.index === index
-                    ? `${subMenuHeight[`${menuType}-${index}`]}px`
+                    ? `${subMenuHeight[`${menuType}-${index}`] ?? 0}px`
                     : "0px",
               }}
             >
@@ -260,78 +397,9 @@ const AppSidebar: React.FC = () => {
     </ul>
   );
 
-  const [openSubmenu, setOpenSubmenu] = useState<{
-    type: "main" | "others";
-    index: number;
-  } | null>(null);
-  const [subMenuHeight, setSubMenuHeight] = useState<Record<string, number>>(
-    {}
-  );
-  const subMenuRefs = useRef<Record<string, HTMLDivElement | null>>({});
-
-  // const isActive = (path: string) => path === pathname;
-  const isActive = useCallback(
-    (path: string) =>
-      pathname === path ||
-      (path.startsWith("/setup/") && pathname.startsWith(path)),
-    [pathname]
-  );
-
-  useEffect(() => {
-    // Check if the current path matches any submenu item
-    let submenuMatched = false;
-    ["main", "others"].forEach((menuType) => {
-      const items = menuType === "main" ? navItems : othersItems;
-      items.forEach((nav, index) => {
-        if (nav.subItems) {
-          nav.subItems.forEach((subItem) => {
-            if (isActive(subItem.path)) {
-              setOpenSubmenu({
-                type: menuType as "main" | "others",
-                index,
-              });
-              submenuMatched = true;
-            }
-          });
-        }
-      });
-    });
-
-    // If no submenu item matches, close the open submenu
-    if (!submenuMatched) {
-      setOpenSubmenu(null);
-    }
-  }, [pathname,isActive]);
-
-  useEffect(() => {
-    // Set the height of the submenu items when the submenu is opened
-    if (openSubmenu !== null) {
-      const key = `${openSubmenu.type}-${openSubmenu.index}`;
-      if (subMenuRefs.current[key]) {
-        setSubMenuHeight((prevHeights) => ({
-          ...prevHeights,
-          [key]: subMenuRefs.current[key]?.scrollHeight || 0,
-        }));
-      }
-    }
-  }, [openSubmenu]);
-
-  const handleSubmenuToggle = (index: number, menuType: "main" | "others") => {
-    setOpenSubmenu((prevOpenSubmenu) => {
-      if (
-        prevOpenSubmenu &&
-        prevOpenSubmenu.type === menuType &&
-        prevOpenSubmenu.index === index
-      ) {
-        return null;
-      }
-      return { type: menuType, index };
-    });
-  };
-
   return (
     <aside
-      className={`app-sidebar fixed mt-16 flex flex-col lg:mt-0 top-0 px-5 left-0 bg-gradient-to-b from-zinc-700 via-zinc-900 to-black text-white shadow-[6px_0_32px_-10px_rgba(0,0,0,0.55)] h-screen transition-all duration-300 ease-in-out z-50 border-0 border-r border-white/[0.08]
+      className={`app-sidebar fixed mt-16 flex flex-col overflow-x-hidden lg:mt-0 top-0 px-5 left-0 bg-gradient-to-b from-zinc-700 via-zinc-900 to-black text-white shadow-[6px_0_32px_-10px_rgba(0,0,0,0.55)] h-screen transition-all duration-300 ease-in-out z-50 border-0 border-r border-white/[0.08]
         ${
           isExpanded || isMobileOpen
             ? "w-[290px]"
@@ -349,7 +417,7 @@ const AppSidebar: React.FC = () => {
           href="/dashboard"
           className="flex w-full justify-center"
         >
-          {isExpanded || isHovered || isMobileOpen ? (
+          {sidebarLabelsVisible ? (
             <img
               src={APP_LOGO_SRC}
               alt="Company logo"
@@ -376,12 +444,12 @@ const AppSidebar: React.FC = () => {
             <div>
               <h2
                 className={`mb-4 text-xs uppercase flex leading-[20px] tracking-wide text-white/45 ${
-                  !isExpanded && !isHovered
+                  !sidebarLabelsVisible
                     ? "lg:justify-center"
                     : "justify-start"
                 }`}
               >
-                {isExpanded || isHovered || isMobileOpen ? (
+                {sidebarLabelsVisible ? (
                   "Menu"
                 ) : (
                   <HorizontaLDots />
@@ -393,12 +461,12 @@ const AppSidebar: React.FC = () => {
             <div className="">
               <h2
                 className={`mb-4 text-xs uppercase flex leading-[20px] tracking-wide text-white/45 ${
-                  !isExpanded && !isHovered
+                  !sidebarLabelsVisible
                     ? "lg:justify-center"
                     : "justify-start"
                 }`}
               >
-                {isExpanded || isHovered || isMobileOpen ? (
+                {sidebarLabelsVisible ? (
                   "Others"
                 ) : (
                   <HorizontaLDots />

@@ -5,6 +5,7 @@ import CustomerPaymentHistoryModal from "@/components/customers/CustomerPaymentH
 import CustomerRenewalInvoiceModal from "@/components/customers/CustomerRenewalInvoiceModal";
 import type { CustomerEngagementResponse } from "@/api/types/template-config";
 import Button from "@/components/ui/button/Button";
+import { invoiceCreateUrl } from "@/lib/invoices/invoice-create-url";
 import {
   FileText,
   History,
@@ -13,6 +14,7 @@ import {
   RotateCcw,
 } from "lucide-react";
 import Link from "next/link";
+import { useRouter } from "next/navigation";
 import { useState } from "react";
 
 type ModalKey = "email" | "payment" | "renewal" | null;
@@ -32,8 +34,15 @@ export default function CustomerDetailActions({
   customerEmail,
   engagements,
 }: Props) {
+  const router = useRouter();
   const [openModal, setOpenModal] = useState<ModalKey>(null);
   const [toast, setToast] = useState<string | null>(null);
+
+  const createInvoiceHref = invoiceCreateUrl({
+    customerId,
+    name: customerName,
+    email: customerEmail ?? undefined,
+  });
 
   function showToast(msg: string) {
     setToast(msg);
@@ -80,12 +89,15 @@ export default function CustomerDetailActions({
               All invoices
             </Button>
           </Link>
-          <Link href={`/invoices/create?from=inv-002`}>
-            <Button type="button" size="sm" variant="outline">
-              <FileText className="mr-1.5 size-4" aria-hidden />
-              New invoice
-            </Button>
-          </Link>
+          <Button
+            type="button"
+            size="sm"
+            variant="outline"
+            onClick={() => router.push(createInvoiceHref)}
+          >
+            <FileText className="mr-1.5 size-4" aria-hidden />
+            New invoice
+          </Button>
         </div>
       </div>
 
@@ -110,17 +122,91 @@ export default function CustomerDetailActions({
         onClose={() => setOpenModal(null)}
         customerId={customerId}
         customerName={customerName}
+        engagements={engagements}
       />
 
       <CustomerRenewalInvoiceModal
         isOpen={openModal === "renewal"}
         onClose={() => setOpenModal(null)}
+        customerId={customerId}
         customerName={customerName}
         customerEmail={customerEmail}
         engagements={engagements}
-        onCreated={() =>
-          showToast("Renewal invoice created (sample). Connect billing API for live data.")
-        }
+        onCreated={() => showToast("Renewal invoice created.")}
+      />
+    </>
+  );
+}
+
+/** Reusable row actions for engagement / customer lists */
+export function CustomerBillingQuickActions({
+  customerId,
+  customerName,
+  customerEmail,
+  engagements = [],
+  compact = false,
+}: {
+  customerId: string;
+  customerName: string;
+  customerEmail?: string | null;
+  engagements?: CustomerEngagementResponse[];
+  compact?: boolean;
+}) {
+  const router = useRouter();
+  const [historyOpen, setHistoryOpen] = useState(false);
+  const [renewalOpen, setRenewalOpen] = useState(false);
+  const size = compact ? "sm" : "sm";
+  const createHref = invoiceCreateUrl({
+    customerId,
+    name: customerName,
+    email: customerEmail ?? undefined,
+  });
+
+  return (
+    <>
+      <div className="flex flex-wrap gap-1.5">
+        <Button
+          type="button"
+          size={size}
+          variant="outline"
+          onClick={() => router.push(createHref)}
+        >
+          <FileText className="mr-1 size-3.5" aria-hidden />
+          Invoice
+        </Button>
+        <Button
+          type="button"
+          size={size}
+          variant="outline"
+          onClick={() => setRenewalOpen(true)}
+        >
+          <RotateCcw className="mr-1 size-3.5" aria-hidden />
+          Renew
+        </Button>
+        <Button
+          type="button"
+          size={size}
+          variant="outline"
+          onClick={() => setHistoryOpen(true)}
+        >
+          <History className="mr-1 size-3.5" aria-hidden />
+          History
+        </Button>
+      </div>
+      <CustomerPaymentHistoryModal
+        isOpen={historyOpen}
+        onClose={() => setHistoryOpen(false)}
+        customerId={customerId}
+        customerName={customerName}
+        engagements={engagements}
+      />
+      <CustomerRenewalInvoiceModal
+        isOpen={renewalOpen}
+        onClose={() => setRenewalOpen(false)}
+        customerId={customerId}
+        customerName={customerName}
+        customerEmail={customerEmail}
+        engagements={engagements}
       />
     </>
   );

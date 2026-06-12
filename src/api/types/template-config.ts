@@ -29,6 +29,31 @@ export interface EngagementPeriodDto {
   summary: string | null;
 }
 
+export interface EngagementPeriodInstanceDto {
+  id: string;
+  catalogNodeId: string | null;
+  label: string;
+  periodStart: string;
+  periodEnd: string | null;
+  sortOrder: number;
+}
+
+export interface PeriodSuggestionDto {
+  label: string;
+  periodStart: string;
+  periodEnd: string | null;
+  sortOrder: number;
+}
+
+export interface EngagementPeriodInstanceRequest {
+  id?: string;
+  catalogNodeId?: string;
+  label: string;
+  periodStart: string;
+  periodEnd?: string | null;
+  sortOrder?: number;
+}
+
 export type EngagementStatus =
   | "DRAFT"
   | "ACTIVE"
@@ -125,6 +150,14 @@ export interface ServiceCatalogNodeResponse {
   sortOrder: number;
   requiresParentCompletion: boolean;
   pricing: PricingTimelineDto | null;
+  recurrence: {
+    recurrenceType: RecurrenceType;
+    recurrenceIntervalValue: number | null;
+    recurrenceIntervalUnit: RecurrenceIntervalUnit | null;
+    catalogEffectiveFrom: string | null;
+    catalogEffectiveTo: string | null;
+    summary: string | null;
+  } | null;
   active: boolean;
   children: ServiceCatalogNodeResponse[];
 }
@@ -181,6 +214,11 @@ export interface CreateCatalogNodeRequest extends CatalogNodeInputFields {
   nodeType: CatalogNodeType;
   sortOrder?: number;
   requiresParentCompletion?: boolean;
+  recurrenceType?: RecurrenceType;
+  recurrenceIntervalValue?: number;
+  recurrenceIntervalUnit?: RecurrenceIntervalUnit;
+  catalogEffectiveFrom?: string | null;
+  catalogEffectiveTo?: string | null;
 }
 
 export interface PatchCatalogNodeRequest extends CatalogNodeInputFields {
@@ -191,6 +229,25 @@ export interface PatchCatalogNodeRequest extends CatalogNodeInputFields {
   nodeType?: CatalogNodeType;
   sortOrder?: number;
   requiresParentCompletion?: boolean;
+  recurrenceType?: RecurrenceType;
+  recurrenceIntervalValue?: number;
+  recurrenceIntervalUnit?: RecurrenceIntervalUnit;
+  catalogEffectiveFrom?: string | null;
+  catalogEffectiveTo?: string | null;
+}
+
+export interface TaskDefaultFormTemplateResponse {
+  companyId: string;
+  catalogId: string;
+  catalogNodeId: string;
+  configuredAt: string;
+  configuredByUserId: string | null;
+  version: number;
+  fields: import("./work-item-template").WorkItemFieldDefinition[];
+}
+
+export interface PutTaskDefaultFormTemplateRequest {
+  fields: import("./work-item-template").WorkItemFieldDefinition[];
 }
 
 export interface MoneyAmountDto {
@@ -329,6 +386,14 @@ export interface EngagementWorkItemResponse {
   status: WorkItemStatus;
   requiresParentCompletion: boolean;
   pricing: PricingTimelineDto | null;
+  recurrence: {
+    recurrenceType: RecurrenceType;
+    recurrenceIntervalValue: number | null;
+    recurrenceIntervalUnit: RecurrenceIntervalUnit | null;
+    catalogEffectiveFrom: string | null;
+    catalogEffectiveTo: string | null;
+    summary: string | null;
+  } | null;
   active: boolean;
 }
 
@@ -352,16 +417,25 @@ export interface CustomerEngagementResponse {
   startedAt: string | null;
   completedAt: string | null;
   period: EngagementPeriodDto | null;
+  periods?: EngagementPeriodInstanceDto[];
   workItems: EngagementWorkItemResponse[];
+}
+
+export interface SetEngagementRootPeriodsRequest {
+  periodStart?: string;
+  count?: number;
+  periods: EngagementPeriodInstanceRequest[];
 }
 
 export interface CreateEngagementRequest {
   customerId: string;
   catalogId: string;
   catalogEntryNodeId?: string;
+  includedRootNodeIds?: string[];
   officeId?: string;
   title: string;
   description?: string;
   periodStart?: string;
   periodEnd?: string;
+  periods?: EngagementPeriodInstanceRequest[];
 }

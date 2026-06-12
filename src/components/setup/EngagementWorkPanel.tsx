@@ -8,13 +8,16 @@ import type {
 import CatalogStructureModal from "@/components/setup/CatalogStructureModal";
 import ExportListMenu from "@/components/setup/ExportListMenu";
 import FieldBuilderModal from "@/components/setup/FieldBuilderModal";
+import { getTaskDefaultFormTemplate } from "@/api/template-config/template-config.api";
 import ExportGroupFormButton from "@/components/setup/ExportGroupFormButton";
 import ShareFormLinkButton from "@/components/setup/ShareFormLinkButton";
 import TaskClosureForm from "@/components/setup/TaskClosureForm";
 import TaskClosureSummary from "@/components/setup/TaskClosureSummary";
+import TaskActivityLog from "@/components/setup/TaskActivityLog";
 import TaskFieldForm from "@/components/setup/TaskFieldForm";
 import WorkItemSubmissionControls from "@/components/setup/WorkItemSubmissionControls";
-import TaskStatusPicker from "@/components/setup/TaskStatusPicker";
+import TaskStatusPicker, { statusLabel } from "@/components/setup/TaskStatusPicker";
+import { useToast } from "@/context/ToastContext";
 import { useWorkItemClosure } from "@/hooks/useWorkItemClosure";
 import { useWorkItemOutputFiles } from "@/hooks/useWorkItemOutputFiles";
 import {
@@ -26,17 +29,35 @@ import Button from "@/components/ui/button/Button";
 import { useEngagementWorkItemStatuses } from "@/hooks/useEngagementWorkItemStatuses";
 import { useWorkItemFieldState } from "@/hooks/useWorkItemFieldState";
 import { prepareFieldValuesForApi } from "@/lib/work-item-field-store";
+import type { EngagementPeriodInstanceDto } from "@/api/types/template-config";
 import {
   buildWorkGroupSections,
   buildWorkItemTree,
   countWorkItems,
+  findTopLevelRootForWorkItem,
 } from "@/lib/work-item-tree";
+import EngagementRootPeriodsSetup from "@/components/setup/EngagementRootPeriodsSetup";
 import SetupEmptyState from "@/components/setup/SetupEmptyState";
-import { ClipboardList, ListTree, Settings2, SlidersHorizontal } from "lucide-react";
+import {
+  isRecurringWorkRoot,
+  periodsForCatalogRoot,
+  resolveTaskPeriodId,
+} from "@/lib/template-recurrence";
+import {
+  ChevronDown,
+  ClipboardList,
+  ListTree,
+  Settings2,
+  SlidersHorizontal,
+} from "lucide-react";
 import {
   loadExpandedGroups,
   saveExpandedGroups,
 } from "@/lib/work-group-expanded-storage";
+import {
+  loadCollapsedTasks,
+  setTaskCollapsed,
+} from "@/lib/work-task-collapsed-storage";
 import { workItemHasExportableData } from "@/lib/export/work-item-field-format";
 import {
   customerForTaskExport,
@@ -59,6 +80,7 @@ export default function EngagementWorkPanel({
   onEngagementRefresh?: () => void | Promise<void>;
 }) {
   const { companyName } = useCompanyContext();
+  const { showError, showSuccess } = useToast();
   const exportCustomer = useMemo(
     () => customerForTaskExport(engagement, customer),
     [engagement, customer]
@@ -77,11 +99,57 @@ export default function EngagementWorkPanel({
     onEngagementRefresh
   );
 
+  // Tree shape follows engagement work items only — not optimistic status (avoids re-expanding groups).
   const tree = useMemo(
-    () => buildWorkItemTree(mergedWorkItems),
-    [mergedWorkItems]
+    () => buildWorkItemTree(engagement.workItems),
+    [engagement.workItems]
   );
+
+  const rootGroups = useMemo(
+    () => tree.filter((n) => n.nodeType === "GROUP"),
+    [tree]
+  );
+
+  const singleRoot = rootGroups.length === 1;
+
+  const recurringRoots = useMemo(
+    () =>
+      rootGroups.filter((r) =>
+        isRecurringWorkRoot(r, engagement, r.catalogNodeId, singleRoot)
+      ),
+    [rootGroups, engagement, singleRoot]
+  );
+
+  const [activePeriodByRoot, setActivePeriodByRoot] = useState<
+    Record<string, string>
+  >({});
+  const [editingPeriodsRootId, setEditingPeriodsRootId] = useState<
+    string | null
+  >(null);
+
   const sections = useMemo(() => buildWorkGroupSections(tree), [tree]);
+
+  const firstSectionKeyByRoot = useMemo(() => {
+    const map = new Map<string, string>();
+    for (const section of sections) {
+      for (const { task } of section.tasks) {
+        const topRoot = findTopLevelRootForWorkItem(task.id, tree);
+        if (!topRoot || map.has(topRoot.id)) continue;
+        map.set(topRoot.id, section.key);
+      }
+    }
+    return map;
+  }, [sections, tree]);
+
+  const getActivePeriodId = useCallback(
+    (catalogNodeId: string, periods: EngagementPeriodInstanceDto[]) => {
+      const stored = activePeriodByRoot[catalogNodeId];
+      if (stored && periods.some((p) => p.id === stored)) return stored;
+      return periods[0]?.id ?? null;
+    },
+    [activePeriodByRoot]
+  );
+
   const counts = useMemo(
     () => countWorkItems(mergedWorkItems),
     [mergedWorkItems]
@@ -95,6 +163,26 @@ export default function EngagementWorkPanel({
     setExpandedGroups(loadExpandedGroups(engagement.id));
   }, [engagement.id]);
 
+  // Default new groups to expanded; respect explicit collapse (false) from user or localStorage.
+  useEffect(() => {
+    if (sections.length === 0) return;
+    setExpandedGroups((prev) => {
+      const next = { ...prev };
+      let changed = false;
+      for (const section of sections) {
+        if (
+          section.groupNumber > 0 &&
+          section.tasks.length > 0 &&
+          next[section.key] === undefined
+        ) {
+          next[section.key] = true;
+          changed = true;
+        }
+      }
+      return changed ? next : prev;
+    });
+  }, [sections]);
+
   useEffect(() => {
     saveExpandedGroups(engagement.id, expandedGroups);
   }, [engagement.id, expandedGroups]);
@@ -102,7 +190,7 @@ export default function EngagementWorkPanel({
   const toggleGroup = useCallback((groupKey: string) => {
     setExpandedGroups((prev) => ({
       ...prev,
-      [groupKey]: !prev[groupKey],
+      [groupKey]: prev[groupKey] === true ? false : true,
     }));
   }, []);
 
@@ -172,16 +260,47 @@ export default function EngagementWorkPanel({
       </div>
 
       <p className="mt-3 text-xs text-gray-500">
-        Groups are collapsed by default — expand to work on tasks. For Done,
-        Blocked, or N/A, add a remark and submit to view a summary table.
+        {recurringRoots.length > 0
+          ? "Expand groups to work on tasks. Recurring groups have period tabs above their tasks. For Done, Blocked, or N/A, add a remark and submit."
+          : "Expand groups to work on tasks. For Done, Blocked, or N/A, add a remark and submit."}
       </p>
 
       <div className="mt-4">
+        {sections.length === 0 ? (
+          <SetupEmptyState
+            icon={ClipboardList}
+            title="No tasks under this service group yet."
+            description="Add TASK nodes under this group in the service catalog structure."
+            variant="bordered"
+          />
+        ) : (
         <WorkItemGroupTree
           sections={sections}
           expandedGroups={expandedGroups}
           onToggleGroup={toggleGroup}
-          renderGroupActions={(section) => (
+          renderGroupActions={(section) => {
+            const firstTask = section.tasks[0]?.task;
+            const topRoot = firstTask
+              ? findTopLevelRootForWorkItem(firstTask.id, tree)
+              : null;
+            const sharePeriodId =
+              topRoot?.catalogNodeId &&
+              isRecurringWorkRoot(
+                topRoot,
+                engagement,
+                topRoot.catalogNodeId,
+                singleRoot
+              )
+                ? getActivePeriodId(
+                    topRoot.catalogNodeId,
+                    periodsForCatalogRoot(
+                      engagement,
+                      topRoot.catalogNodeId,
+                      singleRoot
+                    )
+                  )
+                : null;
+            return (
             <div className="flex flex-wrap items-center justify-end gap-2">
               <ExportGroupFormButton
                 companyId={companyId}
@@ -194,15 +313,120 @@ export default function EngagementWorkPanel({
                 companyId={companyId}
                 engagementId={engagement.id}
                 workItemId={section.key}
+                periodId={sharePeriodId}
                 label="Share group"
                 size="sm"
               />
             </div>
-          )}
-          renderTask={(task, ctx) => (
+            );
+          }}
+          renderBeforeTasks={(section) => {
+            const firstTask = section.tasks[0]?.task;
+            if (!firstTask) return null;
+            const topRoot = findTopLevelRootForWorkItem(firstTask.id, tree);
+            if (!topRoot?.catalogNodeId) return null;
+            if (
+              !isRecurringWorkRoot(
+                topRoot,
+                engagement,
+                topRoot.catalogNodeId,
+                singleRoot
+              )
+            ) {
+              return null;
+            }
+            if (firstSectionKeyByRoot.get(topRoot.id) !== section.key) {
+              return null;
+            }
+
+            const periods = periodsForCatalogRoot(
+              engagement,
+              topRoot.catalogNodeId,
+              singleRoot
+            );
+
+            if (periods.length === 0) {
+              return (
+                <EngagementRootPeriodsSetup
+                  companyId={companyId}
+                  catalogId={engagement.catalogId}
+                  engagementId={engagement.id}
+                  rootNodeId={topRoot.catalogNodeId}
+                  rootName={topRoot.name}
+                  onSaved={async () => {
+                    if (onEngagementRefresh) await onEngagementRefresh();
+                  }}
+                />
+              );
+            }
+
+            const activePeriodId = getActivePeriodId(
+              topRoot.catalogNodeId,
+              periods
+            );
+            const activePeriod =
+              periods.find((p) => p.id === activePeriodId) ?? periods[0];
+
+            if (editingPeriodsRootId === topRoot.catalogNodeId) {
+              return (
+                <EngagementRootPeriodsSetup
+                  companyId={companyId}
+                  catalogId={engagement.catalogId}
+                  engagementId={engagement.id}
+                  rootNodeId={topRoot.catalogNodeId}
+                  rootName={topRoot.name}
+                  initialPeriods={periods}
+                  mode="edit"
+                  onCancel={() => setEditingPeriodsRootId(null)}
+                  onSaved={async () => {
+                    setEditingPeriodsRootId(null);
+                    if (onEngagementRefresh) await onEngagementRefresh();
+                  }}
+                />
+              );
+            }
+
+            return (
+              <GroupPeriodTabs
+                periods={periods}
+                activePeriodId={activePeriodId}
+                activePeriod={activePeriod}
+                onSelect={(periodId) =>
+                  setActivePeriodByRoot((prev) => ({
+                    ...prev,
+                    [topRoot.catalogNodeId]: periodId,
+                  }))
+                }
+                onEdit={() =>
+                  setEditingPeriodsRootId(topRoot.catalogNodeId)
+                }
+              />
+            );
+          }}
+          renderTask={(task, ctx) => {
+            const topRoot = findTopLevelRootForWorkItem(task.id, tree);
+            const rootPeriods = topRoot?.catalogNodeId
+              ? periodsForCatalogRoot(
+                  engagement,
+                  topRoot.catalogNodeId,
+                  singleRoot
+                )
+              : [];
+            const activePeriodId = topRoot?.catalogNodeId
+              ? getActivePeriodId(topRoot.catalogNodeId, rootPeriods)
+              : null;
+            const taskPeriodId = resolveTaskPeriodId(
+              task.id,
+              tree,
+              engagement,
+              activePeriodId
+            );
+            return (
             <TaskWorkCard
+              key={`${task.id}-${taskPeriodId ?? "once"}`}
               companyId={companyId}
               task={task}
+              periodId={taskPeriodId}
               engagement={engagement}
               customer={exportCustomer}
               companyName={companyName ?? "Company"}
@@ -220,12 +444,21 @@ export default function EngagementWorkPanel({
                     [ctx.groupKey!]: true,
                   }));
                 }
-                void setStatus(task.id, s);
+                void (async () => {
+                  const ok = await setStatus(task.id, s);
+                  if (ok) {
+                    showSuccess(`Status updated to ${statusLabel(s)}`);
+                  } else {
+                    showError("Failed to update task status");
+                  }
+                })();
               }}
               onTaskUpdated={onEngagementRefresh}
             />
-          )}
+            );
+          }}
         />
+        )}
       </div>
 
       <CatalogStructureModal
@@ -235,6 +468,65 @@ export default function EngagementWorkPanel({
         workItems={mergedWorkItems}
       />
     </>
+  );
+}
+
+function GroupPeriodTabs({
+  periods,
+  activePeriodId,
+  activePeriod,
+  onSelect,
+  onEdit,
+}: {
+  periods: EngagementPeriodInstanceDto[];
+  activePeriodId: string | null;
+  activePeriod: EngagementPeriodInstanceDto | undefined;
+  onSelect: (periodId: string) => void;
+  onEdit?: () => void;
+}) {
+  return (
+    <div className="mb-3 rounded-lg border border-gray-200 bg-gray-50/80 p-2 dark:border-gray-700 dark:bg-gray-900/40">
+      <div className="mb-1.5 flex flex-wrap items-center justify-between gap-2">
+        <p className="text-[10px] font-medium uppercase tracking-wide text-gray-500">
+          Periods
+        </p>
+        {onEdit ? (
+          <button
+            type="button"
+            onClick={onEdit}
+            className="text-[10px] font-medium text-brand-600 hover:text-brand-700 dark:text-brand-400"
+          >
+            Edit tabs
+          </button>
+        ) : null}
+      </div>
+      <div className="flex flex-wrap gap-1">
+        {periods.map((period) => {
+          const active = period.id === activePeriodId;
+          return (
+            <button
+              key={period.id}
+              type="button"
+              onClick={() => onSelect(period.id)}
+              className={`rounded-md px-2.5 py-1.5 text-xs font-medium transition-colors ${
+                active
+                  ? "bg-white text-brand-600 shadow-sm ring-1 ring-brand-200 dark:bg-gray-900 dark:text-brand-400 dark:ring-brand-800"
+                  : "text-gray-500 hover:bg-white/80 hover:text-gray-800 dark:hover:bg-gray-800 dark:hover:text-white/90"
+              }`}
+            >
+              {period.label}
+            </button>
+          );
+        })}
+      </div>
+      {activePeriod ? (
+        <p className="mt-1.5 text-[10px] text-gray-500">
+          {activePeriod.periodEnd
+            ? `${activePeriod.periodStart} → ${activePeriod.periodEnd}`
+            : `From ${activePeriod.periodStart}`}
+        </p>
+      ) : null}
+    </div>
   );
 }
 
@@ -285,6 +577,7 @@ function TaskSectionExportMenu({
 function TaskWorkCard({
   companyId,
   task,
+  periodId,
   engagement,
   customer,
   companyName,
@@ -296,6 +589,7 @@ function TaskWorkCard({
 }: {
   companyId: string;
   task: import("@/api/types/template-config").EngagementWorkItemResponse;
+  periodId?: string | null;
   engagement: CustomerEngagementResponse;
   customer: CustomerResponse;
   companyName: string;
@@ -306,6 +600,15 @@ function TaskWorkCard({
   onTaskUpdated?: () => void | Promise<void>;
 }) {
   const [builderOpen, setBuilderOpen] = useState(false);
+  const [usingDefaultTemplate, setUsingDefaultTemplate] = useState(false);
+  const [defaultPreviewLoading, setDefaultPreviewLoading] = useState(false);
+  const [builderSeedFields, setBuilderSeedFields] = useState<
+    import("@/api/types/work-item-template").WorkItemFieldDefinition[] | null
+  >(null);
+  const [collapsed, setCollapsed] = useState<boolean>(
+    () => loadCollapsedTasks(engagementId)[task.id] ?? true
+  );
+  const { showError, showSuccess } = useToast();
   const {
     fields,
     values,
@@ -321,12 +624,14 @@ function TaskWorkCard({
     formLinkUrl,
     error: fieldError,
     persistTemplate,
+    applyDefaultTemplate,
     persistValues,
     uploadFieldFile,
     ensureFormLink,
     reload: reloadFields,
     closureInitial,
-  } = useWorkItemFieldState(companyId, engagementId, task.id);
+    activityLogs,
+  } = useWorkItemFieldState(companyId, engagementId, task.id, periodId);
 
   const closureMode = isClosureStatus(status);
   const {
@@ -341,10 +646,12 @@ function TaskWorkCard({
     enabled: closureMode,
   });
 
-  const afterMutation = async () => {
+  const afterMutation = async (refreshParent = false) => {
     await reloadFields();
     await reloadOutputFiles();
-    await onTaskUpdated?.();
+    if (refreshParent) {
+      await onTaskUpdated?.();
+    }
   };
 
   const {
@@ -356,10 +663,19 @@ function TaskWorkCard({
     setRemark,
     submitClosure,
     reopenClosure,
-  } = useWorkItemClosure(engagementId, task.id, status, companyId, {
+  } = useWorkItemClosure(engagementId, task.id, status, companyId, periodId, {
     initialClosure: closureInitial,
-    onAfterSubmit: afterMutation,
+    // Keep closure UX in-place (no full engagement refresh / scroll jump).
+    onAfterSubmit: () => afterMutation(false),
   });
+
+  useEffect(() => {
+    setCollapsed(loadCollapsedTasks(engagementId)[task.id] ?? true);
+  }, [engagementId, task.id]);
+
+  useEffect(() => {
+    setTaskCollapsed(engagementId, task.id, collapsed);
+  }, [engagementId, task.id, collapsed]);
 
   if (!hydrated || !closureHydrated) {
     return (
@@ -403,18 +719,60 @@ function TaskWorkCard({
     outputFiles,
   });
 
+  const cardToneClass =
+    status === "IN_PROGRESS"
+      ? "bg-amber-50/35 dark:bg-amber-950/10"
+      : status === "DONE"
+        ? "bg-emerald-50/35 dark:bg-emerald-950/10"
+        : status === "BLOCKED" || status === "NOT_APPLICABLE"
+          ? "bg-rose-50/30 dark:bg-rose-950/10"
+          : "bg-white dark:bg-gray-900/20";
+
+  async function openDefaultBuilder() {
+    setDefaultPreviewLoading(true);
+    try {
+      const res = await getTaskDefaultFormTemplate(
+        companyId,
+        engagement.catalogId,
+        task.catalogNodeId
+      );
+      setBuilderSeedFields(res.fields ?? []);
+      setBuilderOpen(true);
+    } catch {
+      showError("No default form configured for this task type");
+    } finally {
+      setDefaultPreviewLoading(false);
+    }
+  }
+
   return (
     <>
-      <article className="rounded-xl border border-gray-200 bg-white shadow-sm dark:border-gray-700 dark:bg-gray-900/20">
+      <article
+        className={`rounded-xl border border-gray-200 shadow-sm dark:border-gray-700 ${cardToneClass}`}
+      >
         <div className="flex flex-wrap items-start justify-between gap-2 border-b border-gray-100 px-3 py-2 dark:border-gray-800 sm:px-4">
-          <div className="min-w-0 flex-1">
-            <h6 className="truncate text-sm font-semibold text-gray-900 dark:text-white">
-              {task.name}
-            </h6>
-            {task.description ? (
-              <p className="truncate text-xs text-gray-500">{task.description}</p>
-            ) : null}
-          </div>
+          <button
+            type="button"
+            className="min-w-0 flex flex-1 items-start gap-2 text-left"
+            onClick={() => setCollapsed((v) => !v)}
+            aria-expanded={!collapsed}
+            aria-label={collapsed ? `Expand ${task.name}` : `Collapse ${task.name}`}
+          >
+            <ChevronDown
+              className={`mt-0.5 size-4 shrink-0 text-gray-400 transition-transform ${
+                collapsed ? "-rotate-90" : "rotate-0"
+              }`}
+              aria-hidden
+            />
+            <div className="min-w-0">
+              <h6 className="truncate text-sm font-semibold text-gray-900 dark:text-white">
+                {task.name}
+              </h6>
+              {task.description ? (
+                <p className="truncate text-xs text-gray-500">{task.description}</p>
+              ) : null}
+            </div>
+          </button>
           <div className="flex shrink-0 flex-wrap items-center justify-end gap-2">
             {hasExportData ? (
               <TaskSectionExportMenu input={exportInput} />
@@ -423,7 +781,9 @@ function TaskWorkCard({
           </div>
         </div>
 
+        {!collapsed ? (
         <div className="p-3 sm:p-4">
+          <TaskActivityLog logs={activityLogs} />
           {fieldError ? (
             <p className="mb-2 text-xs text-error-600">{fieldError}</p>
           ) : null}
@@ -497,14 +857,28 @@ function TaskWorkCard({
               description="Choose what to capture — text, documents, dates, and notes."
               variant="bordered"
               action={
-                <Button
-                  type="button"
-                  size="sm"
-                  onClick={() => setBuilderOpen(true)}
-                >
-                  <Settings2 className="mr-1.5 size-4" aria-hidden />
-                  Choose fields to capture
-                </Button>
+                <div className="flex w-full flex-wrap items-center justify-center gap-2">
+                  <Button
+                    type="button"
+                    size="sm"
+                    onClick={() => {
+                      setBuilderSeedFields(null);
+                      setBuilderOpen(true);
+                    }}
+                  >
+                    <Settings2 className="mr-1.5 size-4" aria-hidden />
+                    Choose fields to capture
+                  </Button>
+                  <Button
+                    type="button"
+                    size="sm"
+                    variant="outline"
+                    disabled={usingDefaultTemplate || defaultPreviewLoading}
+                    onClick={() => void openDefaultBuilder()}
+                  >
+                    {defaultPreviewLoading ? "Loading…" : "Use default form"}
+                  </Button>
+                </div>
               }
             />
           ) : (
@@ -534,16 +908,21 @@ function TaskWorkCard({
             </>
           )}
         </div>
+        ) : null}
       </article>
 
       <FieldBuilderModal
         open={builderOpen}
-        onClose={() => setBuilderOpen(false)}
+        onClose={() => {
+          setBuilderOpen(false);
+          setBuilderSeedFields(null);
+        }}
         taskName={task.name}
-        initialFields={fields}
+        initialFields={builderSeedFields ?? fields}
         onSave={async (next) => {
           await persistTemplate(next);
-          await afterMutation();
+          await afterMutation(true);
+          setBuilderSeedFields(null);
         }}
       />
     </>

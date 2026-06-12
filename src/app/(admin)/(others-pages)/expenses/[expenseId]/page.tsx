@@ -1,4 +1,9 @@
 import ExpenseDetailPanel from "@/components/expenses/ExpenseDetailPanel";
+import { Metadata } from "next";
+
+export const metadata: Metadata = {
+  title: "Expense details",
+};
 
 export default async function ExpenseDetailPage({
   params,

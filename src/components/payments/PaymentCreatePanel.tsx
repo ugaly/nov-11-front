@@ -1,6 +1,16 @@
 "use client";
 
 import {
+  createOfficePayment,
+  submitPaymentForApproval,
+  uploadPaymentAttachment,
+} from "@/api/payment/payment.api";
+import type {
+  PaymentReferenceDto,
+  PaymentReminderDto,
+} from "@/api/types/payment";
+import PaymentReferencesEditor from "@/components/payments/PaymentReferencesEditor";
+import {
   SetupBackLink,
   SetupSectionCard,
 } from "@/components/setup/setup-pro-ui";
@@ -8,36 +18,22 @@ import Button from "@/components/ui/button/Button";
 import DatePicker from "@/components/form/date-picker";
 import Input from "@/components/form/input/InputField";
 import Label from "@/components/form/Label";
+import RecurrenceFields, {
+  type RecurrenceConfig,
+} from "@/components/shared/RecurrenceFields";
 import ReminderFields from "@/components/shared/ReminderFields";
-import { fileToDataUrlAttachment } from "@/lib/attachment-utils";
+import { useToast } from "@/context/ToastContext";
+import { getApiErrorMessage } from "@/lib/api-error";
 import {
-  createEmptyReminder,
   sanitizeReminders,
   type ReminderEntry,
 } from "@/lib/reminders/reminder-types";
-import {
-  nextPaymentReference,
-  savePayment,
-} from "@/lib/payments/payment-storage";
-import type {
-  PaymentAttachment,
-  PaymentCategory,
-  PaymentMethod,
-  PaymentRecord,
-} from "@/lib/payments/payment-types";
-import {
-  derivePaymentStatus,
-  PAYMENT_CATEGORY_LABELS,
-  PAYMENT_METHOD_LABELS,
-} from "@/lib/payments/payment-utils";
-import {
-  ChevronLeft,
-  Loader2,
-  Paperclip,
-  X,
-} from "lucide-react";
+import { usePaymentAccess } from "@/lib/payments/use-payment-access";
+import { usePaymentOptions } from "@/lib/payments/use-payment-options";
+import { ChevronLeft, Loader2, Paperclip } from "lucide-react";
+import Link from "next/link";
 import { useRouter } from "next/navigation";
-import { useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 
 const selectClass =
   "h-11 w-full rounded-lg border border-gray-300 bg-white px-4 text-sm text-gray-800 shadow-theme-xs dark:border-gray-700 dark:bg-gray-900 dark:text-white/90";
@@ -47,9 +43,17 @@ const textareaClass =
 
 export default function PaymentCreatePanel() {
   const router = useRouter();
+  const toast = useToast();
+  const { officeId, access, loading: accessLoading } = usePaymentAccess();
+  const {
+    categories,
+    loading: optionsLoading,
+    error: optionsError,
+  } = usePaymentOptions();
+
   const [payeeName, setPayeeName] = useState("");
   const [payeeAccount, setPayeeAccount] = useState("");
-  const [category, setCategory] = useState<PaymentCategory>("SUPPLIER");
+  const [categoryId, setCategoryId] = useState("");
   const [purpose, setPurpose] = useState("");
   const [amountDue, setAmountDue] = useState("");
   const [dueAt, setDueAt] = useState(() => {
@@ -57,83 +61,163 @@ export default function PaymentCreatePanel() {
     d.setDate(d.getDate() + 14);
     return d.toISOString().slice(0, 10);
   });
-  const [markPaidNow, setMarkPaidNow] = useState(false);
-  const [paymentMethod, setPaymentMethod] = useState<PaymentMethod>("BANK_TRANSFER");
+  const [submitAfterCreate, setSubmitAfterCreate] = useState(false);
   const [reconciliationNote, setReconciliationNote] = useState("");
-  const [linkedInvoiceNumber, setLinkedInvoiceNumber] = useState("");
-  const [attachments, setAttachments] = useState<PaymentAttachment[]>([]);
-  const [reminders, setReminders] = useState<ReminderEntry[]>([
-    createEmptyReminder(),
-  ]);
-  const [fileError, setFileError] = useState<string | null>(null);
+  const [references, setReferences] = useState<PaymentReferenceDto[]>([]);
+  const [reminders, setReminders] = useState<ReminderEntry[]>([]);
+  const [attachmentFile, setAttachmentFile] = useState<File | null>(null);
+  const [recurrenceEnabled, setRecurrenceEnabled] = useState(false);
+  const [recurrence, setRecurrence] = useState<RecurrenceConfig>({
+    autoCreateEnabled: true,
+    dayOfMonth: 1,
+    reminderDaysBefore: 7,
+  });
   const [saving, setSaving] = useState(false);
 
-  async function onFileChange(e: React.ChangeEvent<HTMLInputElement>) {
-    const file = e.target.files?.[0];
-    e.target.value = "";
-    if (!file) return;
-    setFileError(null);
-    try {
-      const att = await fileToDataUrlAttachment(file);
-      setAttachments((prev) => [...prev, att]);
-    } catch (err) {
-      setFileError(err instanceof Error ? err.message : "Could not read file.");
+  useEffect(() => {
+    if (categories.length > 0 && !categoryId) {
+      setCategoryId(categories[0].id);
     }
+  }, [categories, categoryId]);
+
+  useEffect(() => {
+    const c = categories.find((x) => x.id === categoryId);
+    if (!c?.recurringAutoCreateDefault) return;
+    setRecurrenceEnabled(true);
+    setRecurrence({
+      autoCreateEnabled: true,
+      dayOfMonth: c.recurringDayOfMonth ?? 1,
+      reminderDaysBefore: c.recurringReminderDaysBefore ?? 7,
+    });
+  }, [categoryId, categories]);
+
+  const selectedCategory = useMemo(
+    () => categories.find((c) => c.id === categoryId),
+    [categories, categoryId]
+  );
+  const needsReconciliation = selectedCategory?.requiresReconciliationNote ?? false;
+
+  if (accessLoading || optionsLoading) {
+    return (
+      <div className="flex min-h-[40vh] items-center justify-center">
+        <Loader2 className="size-8 animate-spin text-gray-400" aria-hidden />
+      </div>
+    );
+  }
+
+  if (!officeId || !access?.canCreate) {
+    return (
+      <div className="space-y-4">
+        <SetupBackLink href="/payments">
+          <ChevronLeft className="size-4" aria-hidden />
+          Back to payments
+        </SetupBackLink>
+        <p className="text-sm text-gray-500">
+          You do not have permission to create payments.
+        </p>
+      </div>
+    );
   }
 
   async function handleSubmit() {
     const amount = Number(amountDue.replace(/,/g, ""));
-    if (!payeeName.trim() || !purpose.trim() || !amount || amount <= 0) return;
-    if (category === "RECONCILIATION" && !reconciliationNote.trim()) return;
+    if (!payeeName.trim() || !purpose.trim() || !amount || amount <= 0) {
+      toast.showError("Payee, purpose, and amount are required.");
+      return;
+    }
+    if (!categoryId) {
+      toast.showError("Select a payment category.");
+      return;
+    }
+    if (needsReconciliation && !reconciliationNote.trim()) {
+      toast.showError("Reconciliation note is required for this category.");
+      return;
+    }
+
+    const reminderPayload: PaymentReminderDto[] = sanitizeReminders(reminders).map(
+      (r) => ({
+        schedule: r.schedule,
+        customAt: r.at,
+        note: r.note,
+      })
+    );
 
     setSaving(true);
-    const now = new Date().toISOString();
-    const today = now.slice(0, 10);
-    const paid = markPaidNow ? amount : 0;
-    const id = `pay-${Date.now()}`;
-    const history = [
-      {
-        id: `h-${Date.now()}`,
-        at: today,
-        label: markPaidNow ? "Created and paid" : "Created (unpaid)",
-        detail: markPaidNow
-          ? `${PAYMENT_METHOD_LABELS[paymentMethod]} — ${purpose}`
-          : `Scheduled — due ${dueAt}`,
-        amount: markPaidNow ? amount : undefined,
-      },
-    ];
-
-    const savedReminders = sanitizeReminders(reminders);
-
-    const record: PaymentRecord = {
-      id,
-      referenceNumber: nextPaymentReference(),
-      payeeName: payeeName.trim(),
-      payeeAccount: payeeAccount.trim() || undefined,
-      category,
-      purpose: purpose.trim(),
-      currency: "TZS",
-      amountDue: amount,
-      amountPaid: paid,
-      status: derivePaymentStatus(amount, paid, markPaidNow ? "PAID" : "UNPAID"),
-      dueAt,
-      createdAt: today,
-      paidAt: markPaidNow ? today : undefined,
-      paymentMethod: markPaidNow ? paymentMethod : undefined,
-      reconciliationNote: reconciliationNote.trim() || undefined,
-      linkedInvoiceNumber: linkedInvoiceNumber.trim() || undefined,
-      attachments,
-      reminders: savedReminders.length > 0 ? savedReminders : undefined,
-      history,
-    };
-
-    savePayment(record);
-    await new Promise((r) => setTimeout(r, 400));
-    setSaving(false);
-    router.push(`/payments/${id}`);
+    try {
+      const oid = officeId!;
+      let payment = await createOfficePayment(oid, {
+        payeeName: payeeName.trim(),
+        payeeAccount: payeeAccount.trim() || undefined,
+        categoryId,
+        purpose: purpose.trim(),
+        currency: "TZS",
+        amountDue: amount,
+        dueDate: dueAt,
+        reconciliationNote: reconciliationNote.trim() || undefined,
+        references: references.length > 0 ? references : undefined,
+        reminders: reminderPayload.length > 0 ? reminderPayload : undefined,
+        recurrence: recurrenceEnabled
+          ? {
+              autoCreateEnabled: recurrence.autoCreateEnabled,
+              dayOfMonth: recurrence.dayOfMonth,
+              reminderDaysBefore: recurrence.reminderDaysBefore,
+            }
+          : undefined,
+      });
+      if (attachmentFile) {
+        try {
+          payment = await uploadPaymentAttachment(oid, payment.id, attachmentFile);
+        } catch (attachErr) {
+          toast.showError(
+            `Payment saved, but attachment failed: ${getApiErrorMessage(
+              attachErr,
+              "Upload failed."
+            )}`
+          );
+          router.push(`/payments/${payment.id}`);
+          return;
+        }
+      }
+      const hasAttachment =
+        (payment.attachments?.length ?? payment.attachmentCount ?? 0) > 0;
+      if (submitAfterCreate && access?.canSubmit) {
+        payment = await submitPaymentForApproval(oid, payment.id);
+        toast.showSuccess(
+          hasAttachment
+            ? "Payment created with attachment and submitted for approval."
+            : "Payment created and submitted for approval."
+        );
+      } else {
+        toast.showSuccess(
+          hasAttachment
+            ? "Payment draft saved with attachment."
+            : "Payment draft saved."
+        );
+      }
+      router.push(`/payments/${payment.id}`);
+    } catch (e) {
+      toast.showError(getApiErrorMessage(e, "Could not save payment."));
+      setSaving(false);
+    }
   }
 
-  const needsReconciliation = category === "RECONCILIATION";
+  if (categories.length === 0) {
+    return (
+      <div className="space-y-4">
+        <SetupBackLink href="/payments">
+          <ChevronLeft className="size-4" aria-hidden />
+          Back to payments
+        </SetupBackLink>
+        <p className="text-sm text-gray-500">
+          {optionsError ?? "No payment categories configured."}{" "}
+          <Link href="/setup/payment-categories" className="text-brand-600 underline">
+            Add categories in Setup
+          </Link>
+          .
+        </p>
+      </div>
+    );
+  }
 
   return (
     <div className="space-y-6">
@@ -144,11 +228,11 @@ export default function PaymentCreatePanel() {
 
       <div>
         <h1 className="text-xl font-semibold text-gray-900 dark:text-white">
-          Record payment
+          New payment
         </h1>
         <p className="mt-1 text-sm text-gray-500 dark:text-gray-400">
-          Outgoing payment to an external entity. Create as unpaid or mark paid on
-          save with reference for reconciliation.
+          Creates a draft for your office. Submit for approval when ready — approvers
+          and payers are configured under Setup → Payment permissions.
         </p>
       </div>
 
@@ -177,14 +261,12 @@ export default function PaymentCreatePanel() {
               <Label>Category</Label>
               <select
                 className={`${selectClass} mt-1.5`}
-                value={category}
-                onChange={(e) =>
-                  setCategory(e.target.value as PaymentCategory)
-                }
+                value={categoryId}
+                onChange={(e) => setCategoryId(e.target.value)}
               >
-                {Object.entries(PAYMENT_CATEGORY_LABELS).map(([k, label]) => (
-                  <option key={k} value={k}>
-                    {label}
+                {categories.map((c) => (
+                  <option key={c.id} value={c.id}>
+                    {c.name}
                   </option>
                 ))}
               </select>
@@ -211,18 +293,22 @@ export default function PaymentCreatePanel() {
               />
             </div>
             <div>
-              <Label>Linked invoice #</Label>
-              <Input
-                value={linkedInvoiceNumber}
-                onChange={(e) => setLinkedInvoiceNumber(e.target.value)}
-                placeholder="Optional — for letter reconciliation"
-                className="mt-1.5"
-              />
+              <Label>Linked references</Label>
+              <p className="mt-1 text-xs text-gray-500">
+                Optional invoice, engagement, or control numbers.
+              </p>
+              <div className="mt-2">
+                <PaymentReferencesEditor
+                  references={references}
+                  editable
+                  onChange={setReferences}
+                />
+              </div>
             </div>
           </div>
         </SetupSectionCard>
 
-        <SetupSectionCard title="Amount & settlement">
+        <SetupSectionCard title="Amount & due date">
           <div className="space-y-4">
             <div>
               <Label>Amount (TZS) *</Label>
@@ -242,91 +328,70 @@ export default function PaymentCreatePanel() {
               />
             </div>
 
-            <label className="flex cursor-pointer items-start gap-3 rounded-xl border border-gray-200 bg-gray-50/80 p-4 dark:border-gray-700 dark:bg-gray-900/50">
-              <input
-                type="checkbox"
-                className="mt-1 size-4 rounded border-gray-300"
-                checked={markPaidNow}
-                onChange={(e) => setMarkPaidNow(e.target.checked)}
-              />
-              <div>
-                <p className="text-sm font-semibold text-gray-900 dark:text-white">
-                  Mark as paid on create
-                </p>
-                <p className="text-xs text-gray-500 dark:text-gray-400">
-                  Records full payment immediately with method and paid date.
-                  Leave unchecked to schedule as unpaid.
-                </p>
-              </div>
-            </label>
-
-            {markPaidNow ? (
-              <div>
-                <Label>Payment method</Label>
-                <select
-                  className={`${selectClass} mt-1.5`}
-                  value={paymentMethod}
-                  onChange={(e) =>
-                    setPaymentMethod(e.target.value as PaymentMethod)
-                  }
-                >
-                  {Object.entries(PAYMENT_METHOD_LABELS).map(([k, label]) => (
-                    <option key={k} value={k}>
-                      {label}
-                    </option>
-                  ))}
-                </select>
-              </div>
-            ) : null}
-
             <ReminderFields
               value={reminders}
               onChange={setReminders}
               referenceDate={dueAt}
               referenceKind="due"
+              optional
+            />
+
+            <RecurrenceFields
+              enabled={recurrenceEnabled}
+              onEnabledChange={setRecurrenceEnabled}
+              value={recurrence}
+              onChange={setRecurrence}
+              className="border-t border-gray-100 pt-4 dark:border-gray-800"
             />
 
             <div>
-              <Label>Reference attachment</Label>
-              <div className="mt-1.5 flex flex-wrap items-center gap-2">
-                <label className="inline-flex cursor-pointer items-center gap-2 rounded-lg border border-dashed border-gray-300 px-4 py-2.5 text-sm font-medium text-gray-700 hover:bg-gray-50 dark:border-gray-600 dark:text-gray-300 dark:hover:bg-gray-800">
-                  <Paperclip className="size-4" aria-hidden />
-                  Upload file
-                  <input
-                    type="file"
-                    className="sr-only"
-                    accept=".pdf,.png,.jpg,.jpeg,.webp"
-                    onChange={(e) => void onFileChange(e)}
-                  />
-                </label>
-              </div>
-              {fileError ? (
-                <p className="mt-1 text-xs text-rose-600">{fileError}</p>
-              ) : null}
-              {attachments.length > 0 ? (
-                <ul className="mt-2 space-y-1">
-                  {attachments.map((a) => (
-                    <li
-                      key={a.id}
-                      className="flex items-center justify-between rounded-lg bg-gray-100 px-3 py-2 text-xs dark:bg-gray-800"
-                    >
-                      <span className="truncate">{a.name}</span>
-                      <button
-                        type="button"
-                        className="text-gray-500 hover:text-rose-600"
-                        onClick={() =>
-                          setAttachments((prev) =>
-                            prev.filter((x) => x.id !== a.id)
-                          )
-                        }
-                      >
-                        <X className="size-3.5" aria-hidden />
-                      </button>
-                    </li>
-                  ))}
-                </ul>
+              <Label>Attachment (optional)</Label>
+              <p className="mt-1 text-xs text-gray-500">
+                Upload a supporting document now, or add more attachments on the
+                detail page after saving.
+              </p>
+              <label className="mt-2 inline-flex cursor-pointer items-center gap-2 rounded-lg border border-dashed border-gray-300 px-4 py-3 text-sm text-brand-600 hover:bg-gray-50 dark:border-gray-700 dark:hover:bg-gray-900/50">
+                <Paperclip className="size-4" aria-hidden />
+                {attachmentFile ? attachmentFile.name : "Choose file"}
+                <input
+                  type="file"
+                  className="sr-only"
+                  accept=".pdf,.png,.jpg,.jpeg,.webp,.doc,.docx,.xls,.xlsx,.txt,.csv"
+                  onChange={(e) => {
+                    setAttachmentFile(e.target.files?.[0] ?? null);
+                    e.target.value = "";
+                  }}
+                />
+              </label>
+              {attachmentFile ? (
+                <button
+                  type="button"
+                  className="mt-1 text-xs text-gray-500 underline"
+                  onClick={() => setAttachmentFile(null)}
+                >
+                  Remove file
+                </button>
               ) : null}
             </div>
+
+            {access?.canSubmit ? (
+              <label className="flex cursor-pointer items-start gap-3 rounded-xl border border-gray-200 bg-gray-50/80 p-4 dark:border-gray-700 dark:bg-gray-900/50">
+                <input
+                  type="checkbox"
+                  className="mt-1 size-4 rounded border-gray-300"
+                  checked={submitAfterCreate}
+                  onChange={(e) => setSubmitAfterCreate(e.target.checked)}
+                />
+                <div>
+                  <p className="text-sm font-semibold text-gray-900 dark:text-white">
+                    Submit for approval after save
+                  </p>
+                  <p className="text-xs text-gray-500 dark:text-gray-400">
+                    Otherwise the payment stays as a draft you can edit later.
+                  </p>
+                </div>
+              </label>
+            ) : null}
 
             <div className="flex gap-2 pt-2">
               <Button
@@ -339,20 +404,17 @@ export default function PaymentCreatePanel() {
                 ) : null}
                 Save payment
               </Button>
-              <LinkButton href="/payments" />
+              <Button
+                type="button"
+                variant="outline"
+                onClick={() => router.push("/payments")}
+              >
+                Cancel
+              </Button>
             </div>
           </div>
         </SetupSectionCard>
       </div>
     </div>
-  );
-}
-
-function LinkButton({ href }: { href: string }) {
-  const router = useRouter();
-  return (
-    <Button type="button" variant="outline" onClick={() => router.push(href)}>
-      Cancel
-    </Button>
   );
 }

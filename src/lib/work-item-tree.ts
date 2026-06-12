@@ -63,43 +63,86 @@ export interface WorkGroupSection {
   }[];
 }
 
+/** Top-level engagement root (GROUP) that contains a task. */
+export function findTopLevelRootForWorkItem(
+  taskId: string,
+  tree: WorkItemTreeNode[]
+): WorkItemTreeNode | null {
+  function contains(node: WorkItemTreeNode): boolean {
+    if (node.id === taskId) return true;
+    return node.children.some(contains);
+  }
+  for (const root of tree) {
+    if (contains(root)) return root;
+  }
+  return null;
+}
+
 export function buildWorkGroupSections(
   tree: WorkItemTreeNode[]
 ): WorkGroupSection[] {
   const sections: WorkGroupSection[] = [];
+  let groupNumber = 0;
 
-  for (let i = 0; i < tree.length; i++) {
-    const root = tree[i]!;
-    if (root.nodeType === "TASK") {
+  function pushGroupSection(
+    node: WorkItemTreeNode,
+    tasks: WorkGroupSection["tasks"]
+  ) {
+    if (tasks.length === 0) return;
+    groupNumber++;
+    sections.push({
+      key: node.id,
+      groupNumber,
+      title: node.name,
+      groupRoman: toRoman(groupNumber - 1),
+      tasks,
+    });
+  }
+
+  function collectTasksFromGroup(
+    node: WorkItemTreeNode
+  ): WorkGroupSection["tasks"] {
+    const tasks: WorkGroupSection["tasks"] = [];
+    const walk = (n: WorkItemTreeNode) => {
+      if (n.nodeType === "TASK") {
+        tasks.push({ task: n, taskRoman: toTaskRoman(tasks.length) });
+        return;
+      }
+      for (const child of n.children) walk(child);
+    };
+    for (const child of node.children) walk(child);
+    return tasks;
+  }
+
+  function processGroupNode(node: WorkItemTreeNode) {
+    const childGroups = node.children.filter((c) => c.nodeType === "GROUP");
+    if (childGroups.length > 0) {
+      for (const child of childGroups) {
+        pushGroupSection(child, collectTasksFromGroup(child));
+      }
+      const directTasks = node.children
+        .filter((c) => c.nodeType === "TASK")
+        .map((t, i) => ({ task: t, taskRoman: toTaskRoman(i) }));
+      if (directTasks.length > 0) {
+        pushGroupSection(node, directTasks);
+      }
+      return;
+    }
+    pushGroupSection(node, collectTasksFromGroup(node));
+  }
+
+  for (const node of tree) {
+    if (node.nodeType === "TASK") {
       sections.push({
-        key: root.id,
+        key: node.id,
         groupNumber: 0,
         title: null,
         groupRoman: null,
-        tasks: [{ task: root, taskRoman: toTaskRoman(0) }],
+        tasks: [{ task: node, taskRoman: toTaskRoman(0) }],
       });
       continue;
     }
-
-    const tasks: WorkGroupSection["tasks"] = [];
-    const collectTasks = (node: WorkItemTreeNode) => {
-      if (node.nodeType === "TASK") {
-        tasks.push({ task: node, taskRoman: toTaskRoman(tasks.length) });
-        return;
-      }
-      for (const child of node.children) collectTasks(child);
-    };
-    for (const child of root.children) collectTasks(child);
-
-    if (tasks.length > 0) {
-      sections.push({
-        key: root.id,
-        groupNumber: i + 1,
-        title: root.name,
-        groupRoman: toRoman(i),
-        tasks,
-      });
-    }
+    processGroupNode(node);
   }
 
   return sections;

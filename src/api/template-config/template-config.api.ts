@@ -14,12 +14,16 @@ import type {
   PatchCustomerRequest,
   PatchServiceCatalogRequest,
   PatchServiceCategoryRequest,
+  PeriodSuggestionDto,
   ServiceCatalogListParams,
   ServiceCatalogNodeResponse,
   ServiceCatalogResponse,
   ServiceCategoryResponse,
   SoftDeleteResponse,
+  TaskDefaultFormTemplateResponse,
   TimelineUnitsResponse,
+  PutTaskDefaultFormTemplateRequest,
+  SetEngagementRootPeriodsRequest,
 } from "../types/template-config";
 
 function companyPath(companyId: string) {
@@ -223,6 +227,43 @@ export async function deleteCatalogNode(
   return data;
 }
 
+export async function suggestEngagementPeriods(
+  companyId: string,
+  catalogId: string,
+  nodeId: string,
+  params?: { periodStart?: string; count?: number }
+): Promise<PeriodSuggestionDto[]> {
+  const { data } = await apiClient.get<PeriodSuggestionDto[]>(
+    `${companyPath(companyId)}/service-catalogs/${catalogId}/nodes/${nodeId}/period-suggestions`,
+    { params }
+  );
+  return data;
+}
+
+export async function getTaskDefaultFormTemplate(
+  companyId: string,
+  catalogId: string,
+  nodeId: string
+): Promise<TaskDefaultFormTemplateResponse> {
+  const { data } = await apiClient.get<TaskDefaultFormTemplateResponse>(
+    `${companyPath(companyId)}/service-catalogs/${catalogId}/nodes/${nodeId}/default-form`
+  );
+  return data;
+}
+
+export async function putTaskDefaultFormTemplate(
+  companyId: string,
+  catalogId: string,
+  nodeId: string,
+  body: PutTaskDefaultFormTemplateRequest
+): Promise<TaskDefaultFormTemplateResponse> {
+  const { data } = await apiClient.put<TaskDefaultFormTemplateResponse>(
+    `${companyPath(companyId)}/service-catalogs/${catalogId}/nodes/${nodeId}/default-form`,
+    body
+  );
+  return data;
+}
+
 // —— Customers ——
 
 export async function listCustomersPaginated(
@@ -327,6 +368,19 @@ export async function createEngagement(
 ): Promise<CustomerEngagementResponse> {
   const { data } = await apiClient.post<CustomerEngagementResponse>(
     `${companyPath(companyId)}/engagements`,
+    body
+  );
+  return data;
+}
+
+export async function setEngagementRootPeriods(
+  companyId: string,
+  engagementId: string,
+  rootNodeId: string,
+  body: SetEngagementRootPeriodsRequest
+): Promise<CustomerEngagementResponse> {
+  const { data } = await apiClient.put<CustomerEngagementResponse>(
+    `${companyPath(companyId)}/engagements/${engagementId}/roots/${rootNodeId}/periods`,
     body
   );
   return data;
