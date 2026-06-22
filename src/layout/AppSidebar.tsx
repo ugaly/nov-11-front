@@ -22,6 +22,7 @@ import {
 
 import { APP_LOGO_SRC } from "@/lib/brand-logo";
 import { useExpenseAccess } from "@/lib/expenses/use-expense-access";
+import { useGeneralAccess } from "@/lib/general/use-general-access";
 import { useInvoiceAccess } from "@/lib/invoices/use-invoice-access";
 import { usePaymentAccess } from "@/lib/payments/use-payment-access";
 import { isAdminUser } from "@/lib/is-admin";
@@ -105,20 +106,42 @@ const baseNavItems: NavItem[] = [
   // },
 ];
 
-function buildOthersItems(showOfficePermissions: boolean): NavItem[] {
+function buildOthersItems(options: {
+  showOfficePermissions: boolean;
+  showSetupMenu: boolean;
+  showSetupConfig: boolean;
+}): NavItem[] {
+  if (!options.showSetupMenu) {
+    return options.showOfficePermissions
+      ? [
+          {
+            icon: <PlugInIcon />,
+            name: "Setup",
+            subItems: [
+              {
+                name: "Office permissions",
+                path: "/setup/payment-permissions",
+              },
+            ],
+          },
+        ]
+      : [];
+  }
   const setupSubItems = [
     { name: "Service categories", path: "/setup/service-categories" },
     { name: "All catalogs", path: "/setup/service-catalogs" },
     { name: "Engagements", path: "/setup/engagements" },
   ];
-  setupSubItems.push(
-    { name: "Payment categories", path: "/setup/payment-categories" },
-    { name: "Payment methods", path: "/setup/payment-methods" },
-    { name: "Partial payment reminders", path: "/setup/payment-partial-reminders" },
-    { name: "Expense types", path: "/setup/expense-types" },
-    { name: "Expense reminders", path: "/setup/expense-reminders" }
-  );
-  if (showOfficePermissions) {
+  if (options.showSetupConfig) {
+    setupSubItems.push(
+      { name: "Payment categories", path: "/setup/payment-categories" },
+      { name: "Payment methods", path: "/setup/payment-methods" },
+      { name: "Partial payment reminders", path: "/setup/payment-partial-reminders" },
+      { name: "Expense types", path: "/setup/expense-types" },
+      { name: "Expense reminders", path: "/setup/expense-reminders" }
+    );
+  }
+  if (options.showOfficePermissions) {
     setupSubItems.push({
       name: "Office permissions",
       path: "/setup/payment-permissions",
@@ -142,8 +165,37 @@ const AppSidebar: React.FC = () => {
     useExpenseAccess();
   const { access: invoiceAccess, loading: invoiceAccessLoading } =
     useInvoiceAccess();
+  const { access: generalAccess, loading: generalAccessLoading } =
+    useGeneralAccess();
   const accessLoading =
-    paymentAccessLoading || expenseAccessLoading || invoiceAccessLoading;
+    paymentAccessLoading ||
+    expenseAccessLoading ||
+    invoiceAccessLoading ||
+    generalAccessLoading;
+  const showDashboard =
+    isAdminUser() || (!accessLoading && Boolean(generalAccess?.visibleDashboard));
+  const showCustomers =
+    isAdminUser() || (!accessLoading && Boolean(generalAccess?.visibleCustomers));
+  const showMail =
+    isAdminUser() || (!accessLoading && Boolean(generalAccess?.visibleMail));
+  const showCompanyProfile =
+    isAdminUser() ||
+    (!accessLoading && Boolean(generalAccess?.visibleCompanyProfile));
+  const showCompanyFiles =
+    isAdminUser() ||
+    (!accessLoading && Boolean(generalAccess?.visibleCompanyFiles));
+  const showSetupMenu =
+    isAdminUser() ||
+    (!accessLoading &&
+      Boolean(
+        generalAccess?.visibleSetup ||
+          paymentAccess?.canManagePermissions ||
+          expenseAccess?.canManagePermissions ||
+          invoiceAccess?.canManagePermissions ||
+          generalAccess?.canManageGeneralPermissions
+      ));
+  const showSetupConfig =
+    isAdminUser() || (!accessLoading && Boolean(generalAccess?.canManageSetup));
   const showPayments =
     isAdminUser() || (!accessLoading && Boolean(paymentAccess?.visible));
   const showExpenses =
@@ -156,21 +208,41 @@ const AppSidebar: React.FC = () => {
       Boolean(
         paymentAccess?.canManagePermissions ||
           expenseAccess?.canManagePermissions ||
-          invoiceAccess?.canManagePermissions
+          invoiceAccess?.canManagePermissions ||
+          generalAccess?.canManageGeneralPermissions
       ));
   const navItems = useMemo(
     () =>
       baseNavItems.filter((item) => {
+        if (item.path === "/dashboard") return showDashboard;
+        if (item.path === "/setup/customers") return showCustomers;
         if (item.path === "/payments") return showPayments;
         if (item.path === "/expenses") return showExpenses;
         if (item.path === "/invoices") return showInvoices;
+        if (item.path === "/mail") return showMail;
+        if (item.path === "/company") return showCompanyProfile;
+        if (item.path === "/company/files") return showCompanyFiles;
         return true;
       }),
-    [showPayments, showExpenses, showInvoices]
+    [
+      showDashboard,
+      showCustomers,
+      showPayments,
+      showExpenses,
+      showInvoices,
+      showMail,
+      showCompanyProfile,
+      showCompanyFiles,
+    ]
   );
   const othersItems = useMemo(
-    () => buildOthersItems(showOfficePermissions),
-    [showOfficePermissions]
+    () =>
+      buildOthersItems({
+        showOfficePermissions,
+        showSetupMenu,
+        showSetupConfig,
+      }),
+    [showOfficePermissions, showSetupMenu, showSetupConfig]
   );
 
   const sidebarLabelsVisible = isExpanded || isHovered || isMobileOpen;

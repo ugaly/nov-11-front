@@ -30,6 +30,7 @@ import Input from "@/components/form/input/InputField";
 import Label from "@/components/form/Label";
 import { Modal } from "@/components/ui/modal";
 import { canManageSetup } from "@/lib/is-admin";
+import { useGeneralAccess } from "@/lib/general/use-general-access";
 import {
   emptyRecurrenceForm,
   formatNodeRecurrence,
@@ -63,7 +64,8 @@ export default function CatalogDetailPanel({ catalogId }: { catalogId: string })
     error: ctxError,
     reload,
   } = useCompanyContext();
-  const canEdit = canManageSetup();
+  const { access: generalAccess } = useGeneralAccess();
+  const canEdit = canManageSetup(generalAccess);
   const [catalog, setCatalog] = useState<ServiceCatalogResponse | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);

@@ -48,6 +48,7 @@ import {
   exportServiceCategoriesPdf,
 } from "@/lib/export/service-categories-export";
 import { canManageSetup } from "@/lib/is-admin";
+import { useGeneralAccess } from "@/lib/general/use-general-access";
 import {
   appendPricingFields,
   emptyPricingForm,
@@ -70,7 +71,8 @@ import Link from "next/link";
 import React, { useCallback, useEffect, useState } from "react";
 
 export default function ServiceCategoriesPanel() {
-  const canEdit = canManageSetup();
+  const { access: generalAccess } = useGeneralAccess();
+  const canEdit = canManageSetup(generalAccess);
   return (
     <SetupPageShell
       title="Service categories"

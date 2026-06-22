@@ -1,6 +1,10 @@
 "use client";
 
 import {
+  listGeneralPermissions,
+  upsertGeneralPermission,
+} from "@/api/general/general.api";
+import {
   listExpensePermissions,
   upsertExpensePermission,
 } from "@/api/expense/expense.api";
@@ -12,6 +16,7 @@ import {
   listPaymentPermissions,
   upsertPaymentPermission,
 } from "@/api/payment/payment.api";
+import type { GeneralPermissionDto } from "@/api/types/general";
 import type { ExpensePermissionDto } from "@/api/types/expense";
 import type {
   InvoicePermissionDto,
@@ -21,6 +26,9 @@ import type {
   PaymentPermissionDto,
   UpsertPaymentPermissionRequest,
 } from "@/api/types/payment";
+import GeneralPermissionsCards, {
+  defaultGeneralPermissionRow,
+} from "@/components/setup/GeneralPermissionsCards";
 import PermissionModuleCard, {
   type PermissionToggle,
 } from "@/components/setup/PermissionModuleCard";
@@ -31,9 +39,10 @@ import Button from "@/components/ui/button/Button";
 import { useToast } from "@/context/ToastContext";
 import { useExpenseAccess } from "@/lib/expenses/use-expense-access";
 import { useInvoiceAccess } from "@/lib/invoices/use-invoice-access";
+import { useGeneralAccess } from "@/lib/general/use-general-access";
+import { isAdminUser } from "@/lib/is-admin";
 import { usePaymentAccess } from "@/lib/payments/use-payment-access";
 import {
-  FileStack,
   FileText,
   Loader2,
   PieChart,
@@ -182,6 +191,8 @@ function defaultInvoiceRow(user: {
 
 export default function PaymentPermissionsPanel() {
   const toast = useToast();
+  const { access: generalAccess, loading: generalAccessLoading } =
+    useGeneralAccess();
   const { officeId, access: paymentAccess, loading: paymentAccessLoading } =
     usePaymentAccess();
   const { access: expenseAccess, loading: expenseAccessLoading } =
@@ -189,19 +200,30 @@ export default function PaymentPermissionsPanel() {
   const { access: invoiceAccess, loading: invoiceAccessLoading } =
     useInvoiceAccess();
   const accessLoading =
-    paymentAccessLoading || expenseAccessLoading || invoiceAccessLoading;
+    paymentAccessLoading ||
+    expenseAccessLoading ||
+    invoiceAccessLoading ||
+    generalAccessLoading;
+  const canManageGeneral =
+    isAdminUser() || Boolean(generalAccess?.canManageGeneralPermissions);
   const canManage =
+    canManageGeneral ||
     Boolean(paymentAccess?.canManagePermissions) ||
     Boolean(expenseAccess?.canManagePermissions) ||
     Boolean(invoiceAccess?.canManagePermissions);
+  const canManagePayments = Boolean(paymentAccess?.canManagePermissions);
+  const canManageExpenses = Boolean(expenseAccess?.canManagePermissions);
+  const canManageInvoices = Boolean(invoiceAccess?.canManagePermissions);
 
   const [paymentRows, setPaymentRows] = useState<PaymentPermissionDto[]>([]);
   const [expenseRows, setExpenseRows] = useState<ExpensePermissionDto[]>([]);
   const [invoiceRows, setInvoiceRows] = useState<InvoicePermissionDto[]>([]);
+  const [generalRows, setGeneralRows] = useState<GeneralPermissionDto[]>([]);
   const [loading, setLoading] = useState(true);
   const [savingPayment, setSavingPayment] = useState(false);
   const [savingExpense, setSavingExpense] = useState(false);
   const [savingInvoice, setSavingInvoice] = useState(false);
+  const [savingGeneral, setSavingGeneral] = useState(false);
   const [selectedUserId, setSelectedUserId] = useState<string | null>(null);
   const [search, setSearch] = useState("");
 
@@ -209,19 +231,54 @@ export default function PaymentPermissionsPanel() {
     if (!officeId) return;
     setLoading(true);
     try {
-      const [payments, expenses, invoices] = await Promise.all([
-        listPaymentPermissions(officeId),
-        listExpensePermissions(officeId),
-        listInvoicePermissions(officeId),
-      ]);
+      const [paymentsResult, expensesResult, invoicesResult, generalResult] =
+        await Promise.allSettled([
+          canManagePayments
+            ? listPaymentPermissions(officeId)
+            : Promise.resolve([] as PaymentPermissionDto[]),
+          canManageExpenses
+            ? listExpensePermissions(officeId)
+            : Promise.resolve([] as ExpensePermissionDto[]),
+          canManageInvoices
+            ? listInvoicePermissions(officeId)
+            : Promise.resolve([] as InvoicePermissionDto[]),
+          canManageGeneral
+            ? listGeneralPermissions(officeId)
+            : Promise.resolve([] as GeneralPermissionDto[]),
+        ]);
+
+      const payments =
+        paymentsResult.status === "fulfilled" ? paymentsResult.value : [];
+      const expenses =
+        expensesResult.status === "fulfilled" ? expensesResult.value : [];
+      const invoices =
+        invoicesResult.status === "fulfilled" ? invoicesResult.value : [];
+      const general =
+        generalResult.status === "fulfilled" ? generalResult.value : [];
+
+      if (paymentsResult.status === "rejected") {
+        toast.showError("Could not load payment permissions.");
+      }
+      if (expensesResult.status === "rejected") {
+        toast.showError("Could not load expense permissions.");
+      }
+      if (invoicesResult.status === "rejected") {
+        toast.showError("Could not load invoice permissions.");
+      }
+      if (generalResult.status === "rejected") {
+        toast.showError("Could not load general module permissions.");
+      }
+
       setPaymentRows(payments);
       setExpenseRows(expenses);
       setInvoiceRows(invoices);
+      setGeneralRows(general);
 
       const userIds = new Set<string>();
       for (const row of payments) userIds.add(row.userId);
       for (const row of expenses) userIds.add(row.userId);
       for (const row of invoices) userIds.add(row.userId);
+      for (const row of general) userIds.add(row.userId);
       const mergedIds = [...userIds];
 
       setSelectedUserId((prev) => {
@@ -235,7 +292,14 @@ export default function PaymentPermissionsPanel() {
     } finally {
       setLoading(false);
     }
-  }, [officeId, toast]);
+  }, [
+    officeId,
+    canManagePayments,
+    canManageExpenses,
+    canManageInvoices,
+    canManageGeneral,
+    toast,
+  ]);
 
   useEffect(() => {
     void refresh();
@@ -271,10 +335,19 @@ export default function PaymentPermissionsPanel() {
         });
       }
     }
+    for (const row of generalRows) {
+      if (!map.has(row.userId)) {
+        map.set(row.userId, {
+          userId: row.userId,
+          userFullName: row.userFullName,
+          userEmail: row.userEmail,
+        });
+      }
+    }
     return [...map.values()].sort((a, b) =>
       a.userFullName.localeCompare(b.userFullName)
     );
-  }, [paymentRows, expenseRows, invoiceRows]);
+  }, [paymentRows, expenseRows, invoiceRows, generalRows]);
 
   const filteredUsers = useMemo(() => {
     const q = search.trim().toLowerCase();
@@ -322,7 +395,44 @@ export default function PaymentPermissionsPanel() {
         )
       : null);
 
+  const selectedGeneral =
+    generalRows.find((r) => r.userId === selectedUserId) ??
+    (selectedUserId
+      ? defaultGeneralPermissionRow(
+          mergedUsers.find((u) => u.userId === selectedUserId) ?? {
+            userId: selectedUserId,
+            userFullName: "User",
+            userEmail: "",
+          }
+        )
+      : null);
+
   const selectedUser = mergedUsers.find((u) => u.userId === selectedUserId) ?? null;
+
+  async function saveGeneralFlags(
+    next: Omit<GeneralPermissionDto, "id" | "userId" | "userFullName" | "userEmail">
+  ) {
+    if (!officeId || !selectedUserId) return;
+    setSavingGeneral(true);
+    try {
+      const updated = await upsertGeneralPermission(officeId, {
+        userId: selectedUserId,
+        ...next,
+      });
+      setGeneralRows((prev) => {
+        const exists = prev.some((r) => r.userId === updated.userId);
+        if (exists) {
+          return prev.map((r) => (r.userId === updated.userId ? updated : r));
+        }
+        return [...prev, updated];
+      });
+      toast.showSuccess("General permissions saved.");
+    } catch (e) {
+      toast.showError(e instanceof Error ? e.message : "Save failed.");
+    } finally {
+      setSavingGeneral(false);
+    }
+  }
 
   async function savePaymentFlags(next: PaymentPermFlags) {
     if (!officeId || !selectedUserId) return;
@@ -515,41 +625,6 @@ export default function PaymentPermissionsPanel() {
     onChange: (checked) => patchExpenseFlag(meta.key, checked),
   }));
 
-  const generalToggles: PermissionToggle[] = [
-    {
-      key: "view",
-      label: "View records",
-      description: "Read-only access to shared office data.",
-      checked: false,
-      disabled: true,
-      onChange: () => undefined,
-    },
-    {
-      key: "create",
-      label: "Create",
-      description: "Add new records in assigned modules.",
-      checked: false,
-      disabled: true,
-      onChange: () => undefined,
-    },
-    {
-      key: "update",
-      label: "Update",
-      description: "Edit existing records.",
-      checked: false,
-      disabled: true,
-      onChange: () => undefined,
-    },
-    {
-      key: "delete",
-      label: "Delete",
-      description: "Remove or archive records.",
-      checked: false,
-      disabled: true,
-      onChange: () => undefined,
-    },
-  ];
-
   return (
     <SetupPageShell
       title="Office permissions"
@@ -606,10 +681,19 @@ export default function PaymentPermissionsPanel() {
                     const invoiceRow = invoiceRows.find(
                       (r) => r.userId === user.userId
                     );
+                    const generalRow = generalRows.find(
+                      (r) => r.userId === user.userId
+                    );
                     const hasAccess =
                       Boolean(paymentRow?.visible) ||
                       Boolean(expenseRow?.visible) ||
-                      Boolean(invoiceRow?.visible);
+                      Boolean(invoiceRow?.visible) ||
+                      Boolean(generalRow?.visibleDashboard) ||
+                      Boolean(generalRow?.visibleCustomers) ||
+                      Boolean(generalRow?.visibleMail) ||
+                      Boolean(generalRow?.visibleCompanyFiles) ||
+                      Boolean(generalRow?.visibleSetup) ||
+                      Boolean(generalRow?.visibleCompanyProfile);
                     return (
                       <li key={user.userId}>
                         <button
@@ -646,7 +730,7 @@ export default function PaymentPermissionsPanel() {
               </aside>
 
               <div className="space-y-4">
-                {selectedUser && selectedPayment && selectedExpense && selectedInvoice ? (
+                {selectedUser ? (
                   <>
                     <div className="rounded-2xl border border-gray-200 bg-white px-5 py-4 shadow-sm dark:border-gray-800 dark:bg-white/[0.02]">
                       <div className="flex flex-wrap items-center gap-3">
@@ -667,6 +751,7 @@ export default function PaymentPermissionsPanel() {
                       </p>
                     </div>
 
+                    {canManagePayments && selectedPayment ? (
                     <PermissionModuleCard
                       title="Payments"
                       description="Office payment requests, approvals, and settlements."
@@ -675,7 +760,9 @@ export default function PaymentPermissionsPanel() {
                       onEnabledChange={(v) => patchPaymentFlag("visible", v)}
                       permissions={paymentToggles}
                     />
+                    ) : null}
 
+                    {canManageExpenses && selectedExpense ? (
                     <PermissionModuleCard
                       title="Expenses"
                       description="Office expense claims, approvals, and reimbursements."
@@ -684,7 +771,9 @@ export default function PaymentPermissionsPanel() {
                       onEnabledChange={(v) => patchExpenseFlag("visible", v)}
                       permissions={expenseToggles}
                     />
+                    ) : null}
 
+                    {canManageInvoices && selectedInvoice ? (
                     <PermissionModuleCard
                       title="Invoices"
                       description="Create, email, and track office invoices."
@@ -693,20 +782,15 @@ export default function PaymentPermissionsPanel() {
                       onEnabledChange={(v) => patchInvoiceFlag("visible", v)}
                       permissions={invoiceToggles}
                     />
+                    ) : null}
 
-                    <PermissionModuleCard
-                      title="General office data"
-                      description="Shared CRUD permissions for customers, engagements, and catalogs."
-                      icon={FileStack}
-                      comingSoon
-                      permissions={generalToggles}
-                      footer={
-                        <p className="text-xs text-gray-500">
-                          Module-level edit, update, and delete controls will appear
-                          here as each area is connected to the permission service.
-                        </p>
-                      }
-                    />
+                    {canManageGeneral && selectedGeneral ? (
+                      <GeneralPermissionsCards
+                        selected={selectedGeneral}
+                        saving={savingGeneral}
+                        onPatch={(next) => void saveGeneralFlags(next)}
+                      />
+                    ) : null}
                   </>
                 ) : (
                   <SetupEmptyState

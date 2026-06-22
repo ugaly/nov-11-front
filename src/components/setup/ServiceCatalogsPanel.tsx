@@ -33,6 +33,7 @@ import {
 } from "@/components/ui/table";
 import { useCompanyContext } from "@/hooks/useCompanyContext";
 import { canManageSetup } from "@/lib/is-admin";
+import { useGeneralAccess } from "@/lib/general/use-general-access";
 import {
   exportServiceCatalogsExcel,
   exportServiceCatalogsPdf,
@@ -91,7 +92,8 @@ export default function ServiceCatalogsPanel() {
 
 function CatalogList({ companyId }: { companyId: string }) {
   const { companyName } = useCompanyContext();
-  const canEdit = canManageSetup();
+  const { access: generalAccess } = useGeneralAccess();
+  const canEdit = canManageSetup(generalAccess);
   const [items, setItems] = useState<ServiceCatalogResponse[]>([]);
   const [categories, setCategories] = useState<ServiceCategoryResponse[]>([]);
   const [loading, setLoading] = useState(true);

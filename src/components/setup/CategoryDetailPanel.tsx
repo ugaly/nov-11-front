@@ -18,6 +18,7 @@ import {
 import Button from "@/components/ui/button/Button";
 import { useCompanyContext } from "@/hooks/useCompanyContext";
 import { canManageSetup } from "@/lib/is-admin";
+import { useGeneralAccess } from "@/lib/general/use-general-access";
 import {
   exportServiceCatalogsExcel,
   exportServiceCatalogsPdf,
@@ -40,7 +41,8 @@ export default function CategoryDetailPanel({
     error: ctxError,
     reload,
   } = useCompanyContext();
-  const canEdit = canManageSetup();
+  const { access: generalAccess } = useGeneralAccess();
+  const canEdit = canManageSetup(generalAccess);
   const [categoryName, setCategoryName] = useState("");
   const [categoryPricing, setCategoryPricing] =
     useState<string>("");

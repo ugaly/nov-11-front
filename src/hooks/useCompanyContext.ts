@@ -1,8 +1,7 @@
 "use client";
 
-import { apiClient } from "@/api/client";
-import type { CompanyResponse } from "@/api/types/organization";
-import { getStoredUser } from "@/lib/auth-storage";
+import { getCurrentUser } from "@/api/users/users.api";
+import { getStoredUser, updateStoredUser } from "@/lib/auth-storage";
 import axios from "axios";
 import { useRouter } from "next/navigation";
 import { useCallback, useEffect, useState } from "react";
@@ -15,23 +14,6 @@ type CompanyContextValue = {
   reload: () => Promise<void>;
 };
 
-async function fetchCompanies(): Promise<CompanyResponse[]> {
-  const { data } = await apiClient.get<CompanyResponse[]>("/api/companies");
-  return data;
-}
-
-function pickCompany(
-  companies: CompanyResponse[],
-  preferredId?: string | null
-): CompanyResponse | null {
-  if (companies.length === 0) return null;
-  if (preferredId) {
-    const match = companies.find((c) => c.id === preferredId && c.active);
-    if (match) return match;
-  }
-  return companies.find((c) => c.active) ?? companies[0];
-}
-
 export function useCompanyContext(): CompanyContextValue {
   const router = useRouter();
   const [companyId, setCompanyId] = useState<string | null>(null);
@@ -43,20 +25,25 @@ export function useCompanyContext(): CompanyContextValue {
     setLoading(true);
     setError(null);
     try {
-      const companies = await fetchCompanies();
-      const user = getStoredUser() as { companyId?: string } | null;
-      const picked = pickCompany(companies, user?.companyId);
-      if (!picked) {
+      const me = await getCurrentUser();
+      updateStoredUser(me);
+      if (!me.companyId) {
         setCompanyId(null);
         setCompanyName(null);
-        setError("No company found for your account.");
+        setError("Your account is not linked to a company.");
         return;
       }
-      setCompanyId(picked.id);
-      setCompanyName(picked.name);
+      setCompanyId(me.companyId);
+      setCompanyName(me.companyName ?? getStoredUser()?.companyName ?? null);
     } catch (err) {
       if (axios.isAxiosError(err) && err.response?.status === 401) {
         router.replace("/");
+        return;
+      }
+      const cached = getStoredUser();
+      if (cached?.companyId) {
+        setCompanyId(cached.companyId);
+        setCompanyName(cached.companyName ?? null);
         return;
       }
       setCompanyId(null);

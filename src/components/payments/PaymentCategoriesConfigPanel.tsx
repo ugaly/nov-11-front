@@ -33,11 +33,13 @@ import {
 } from "@/components/ui/table";
 import { useToast } from "@/context/ToastContext";
 import { canManageSetup } from "@/lib/is-admin";
+import { useGeneralAccess } from "@/lib/general/use-general-access";
 import { FolderTree, Loader2, Plus, RefreshCw } from "lucide-react";
 import { useCallback, useEffect, useState } from "react";
 
 export default function PaymentCategoriesConfigPanel() {
-  const canEdit = canManageSetup();
+  const { access: generalAccess } = useGeneralAccess();
+  const canEdit = canManageSetup(generalAccess);
   return (
     <SetupPageShell
       title="Payment categories"

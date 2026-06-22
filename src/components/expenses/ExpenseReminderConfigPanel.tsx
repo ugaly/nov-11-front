@@ -12,6 +12,7 @@ import Input from "@/components/form/input/InputField";
 import Label from "@/components/form/Label";
 import { useToast } from "@/context/ToastContext";
 import { canManageSetup } from "@/lib/is-admin";
+import { useGeneralAccess } from "@/lib/general/use-general-access";
 import { Bell, Loader2 } from "lucide-react";
 import { useCallback, useEffect, useState } from "react";
 
@@ -22,7 +23,8 @@ const PRESET_DAYS = [
 ];
 
 export default function ExpenseReminderConfigPanel() {
-  const canEdit = canManageSetup();
+  const { access: generalAccess } = useGeneralAccess();
+  const canEdit = canManageSetup(generalAccess);
   return (
     <SetupPageShell
       title="Expense reminders"

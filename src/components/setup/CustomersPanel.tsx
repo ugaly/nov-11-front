@@ -50,7 +50,8 @@ import Label from "@/components/form/Label";
 import { Modal } from "@/components/ui/modal";
 import { getAccessToken } from "@/lib/auth-storage";
 import { formatMoneyTotals } from "@/lib/format-money";
-import { canManageSetup } from "@/lib/is-admin";
+import { isAdminUser } from "@/lib/is-admin";
+import { useGeneralAccess } from "@/lib/general/use-general-access";
 import {
   SetupAvatar,
   SetupContactLine,
@@ -83,7 +84,14 @@ const selectClass =
   "h-10 w-full rounded-lg border border-gray-300 bg-white px-3 text-sm text-gray-800 shadow-theme-xs dark:border-gray-700 dark:bg-gray-900 dark:text-white/90";
 
 export default function CustomersPanel() {
-  const canEdit = canManageSetup();
+  const { access: generalAccess } = useGeneralAccess();
+  const canEdit =
+    isAdminUser() ||
+    Boolean(
+      generalAccess?.canCreateCustomers ||
+        generalAccess?.canUpdateCustomers ||
+        generalAccess?.canDeleteCustomers
+    );
   return (
     <SetupPageShell
       title="Customers"
