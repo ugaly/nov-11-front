@@ -1,0 +1,8 @@
+node_modules
+.next
+.git
+.idea
+.env*.local
+npm-debug.log*
+README.md
+frontend-integration.md
