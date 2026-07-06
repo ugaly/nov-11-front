@@ -1,5 +1,7 @@
 export type CatalogNodeType = "GROUP" | "TASK";
 
+import type { InvoiceWorkflowStatus } from "./invoice";
+
 export type Currency = "TZS" | "USD";
 
 export type TimelineUnit =
@@ -243,10 +245,12 @@ export interface TaskDefaultFormTemplateResponse {
   configuredAt: string;
   configuredByUserId: string | null;
   version: number;
+  groups?: import("./work-item-template").WorkItemFieldGroup[];
   fields: import("./work-item-template").WorkItemFieldDefinition[];
 }
 
 export interface PutTaskDefaultFormTemplateRequest {
+  groups?: import("./work-item-template").WorkItemFieldGroup[];
   fields: import("./work-item-template").WorkItemFieldDefinition[];
 }
 
@@ -287,6 +291,18 @@ export interface CustomerListItemResponse {
   totalEngagementCount: number;
   categories: CustomerCategoryAssignmentDto[];
   assignedCatalogsPriceTotals: MoneyAmountDto[];
+  engagementBilling: CustomerEngagementBillingSummary | null;
+}
+
+export interface CustomerEngagementBillingSummary {
+  chargeTotals: MoneyAmountDto[];
+  paidTotals: MoneyAmountDto[];
+  remainingTotals: MoneyAmountDto[];
+  engagementsWithCharge: number;
+  paidCount: number;
+  partialCount: number;
+  unpaidCount: number;
+  noInvoiceCount: number;
 }
 
 export interface PageResponse<T> {
@@ -340,6 +356,7 @@ export interface CustomerResponse {
   country: string | null;
   notes: string | null;
   active: boolean;
+  sendWelcomeEmail: boolean;
 }
 
 export interface CreateCustomerRequest {
@@ -354,6 +371,7 @@ export interface CreateCustomerRequest {
   city?: string;
   country?: string;
   notes?: string;
+  sendWelcomeEmail?: boolean;
 }
 
 export interface PatchCustomerRequest {
@@ -368,6 +386,7 @@ export interface PatchCustomerRequest {
   city?: string;
   country?: string;
   notes?: string;
+  sendWelcomeEmail?: boolean;
 }
 
 export interface EngagementWorkItemResponse {
@@ -416,15 +435,45 @@ export interface CustomerEngagementResponse {
   active: boolean;
   startedAt: string | null;
   completedAt: string | null;
+  pricing: PricingTimelineDto | null;
   period: EngagementPeriodDto | null;
   periods?: EngagementPeriodInstanceDto[];
   workItems: EngagementWorkItemResponse[];
+  invoice: EngagementInvoiceSummary | null;
 }
 
 export interface SetEngagementRootPeriodsRequest {
   periodStart?: string;
   count?: number;
   periods: EngagementPeriodInstanceRequest[];
+}
+
+export type EngagementPaymentReminderSchedule =
+  | "TWO_DAYS_BEFORE"
+  | "ONE_WEEK_BEFORE"
+  | "TWO_WEEKS_BEFORE"
+  | "ONE_MONTH_BEFORE"
+  | "ON_REFERENCE_DATE"
+  | "EVERY_WEEK"
+  | "EVERY_MONTH"
+  | "CUSTOM";
+
+export interface EngagementPaymentReminderRequest {
+  schedule: EngagementPaymentReminderSchedule;
+  customAt?: string;
+  note?: string;
+  recipientUserIds: string[];
+}
+
+export interface EngagementInvoiceSummary {
+  id: string;
+  referenceNumber: string;
+  status: InvoiceWorkflowStatus;
+  currency: string;
+  totalAmount: number;
+  amountPaid: number;
+  amountRemaining: number;
+  dueDate: string;
 }
 
 export interface CreateEngagementRequest {
@@ -437,5 +486,9 @@ export interface CreateEngagementRequest {
   description?: string;
   periodStart?: string;
   periodEnd?: string;
+  price?: number;
+  currency?: Currency;
+  paymentReminders?: EngagementPaymentReminderRequest[];
+  createInvoice?: boolean;
   periods?: EngagementPeriodInstanceRequest[];
 }

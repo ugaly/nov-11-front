@@ -149,7 +149,7 @@ export function FileAttachmentTileGrid({
 }) {
   if (!files.length && !addTile) {
     return emptyMessage ? (
-      <p className="text-xs text-gray-500 italic">{emptyMessage}</p>
+      <div>{emptyMessage}</div>
     ) : null;
   }
 

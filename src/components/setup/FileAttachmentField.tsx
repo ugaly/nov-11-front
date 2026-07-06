@@ -11,8 +11,8 @@ import {
   getAttachments,
 } from "@/lib/work-item-file-utils";
 import type { WorkItemFieldValue } from "@/api/types/work-item-template";
-import { Plus } from "lucide-react";
-import { useState, type ReactNode } from "react";
+import { Plus, Upload } from "lucide-react";
+import { useState, type DragEvent, type ReactNode } from "react";
 
 export default function FileAttachmentField({
   label,
@@ -21,6 +21,10 @@ export default function FileAttachmentField({
   allowMultiple,
   onChange,
   onUploadFile,
+  emptyMessage,
+  readOnlyHint,
+  className,
+  uploadStyle = "tile",
 }: {
   label?: ReactNode | null;
   value?: WorkItemFieldValue;
@@ -29,6 +33,13 @@ export default function FileAttachmentField({
   onChange: (patch: Partial<WorkItemFieldValue>) => void;
   /** When set, uploads to API instead of base64 local storage. */
   onUploadFile?: (file: File) => Promise<WorkItemFileAttachment>;
+  /** Shown when read-only and there are no attachments yet. */
+  emptyMessage?: ReactNode;
+  /** Hint below tiles when read-only and files are present. */
+  readOnlyHint?: string;
+  className?: string;
+  /** Banner = full-width drop zone (public customer forms). Tile = compact grid add tile. */
+  uploadStyle?: "tile" | "banner";
 }) {
   const attachments = getAttachments(value);
   const [previewFile, setPreviewFile] = useState<WorkItemFileAttachment | null>(
@@ -36,6 +47,7 @@ export default function FileAttachmentField({
   );
   const [uploading, setUploading] = useState(false);
   const [uploadError, setUploadError] = useState<string | null>(null);
+  const [dragActive, setDragActive] = useState(false);
 
   async function handleFiles(list: FileList | null) {
     if (!list?.length || readOnly) return;
@@ -77,7 +89,73 @@ export default function FileAttachmentField({
     onChange(attachmentsToFieldPatch(next));
   }
 
-  const showAddTile = !readOnly && (allowMultiple || attachments.length === 0);
+  const showAddTile =
+    uploadStyle === "tile" &&
+    !readOnly &&
+    (allowMultiple || attachments.length === 0);
+
+  const showBannerUpload =
+    uploadStyle === "banner" &&
+    !readOnly &&
+    (allowMultiple || attachments.length === 0);
+
+  function onDragOver(e: DragEvent) {
+    e.preventDefault();
+    if (!readOnly && !uploading) setDragActive(true);
+  }
+
+  function onDragLeave(e: DragEvent) {
+    e.preventDefault();
+    setDragActive(false);
+  }
+
+  function onDrop(e: DragEvent) {
+    e.preventDefault();
+    setDragActive(false);
+    void handleFiles(e.dataTransfer.files);
+  }
+
+  const bannerUpload = showBannerUpload ? (
+    <label
+      onDragOver={onDragOver}
+      onDragLeave={onDragLeave}
+      onDrop={onDrop}
+      className={`relative flex w-full cursor-pointer flex-col items-center justify-center gap-2 rounded-xl border-2 border-dashed px-4 py-8 text-center transition ${
+        attachments.length > 0 ? "py-5" : "py-10"
+      } ${
+        dragActive
+          ? "border-brand-400 bg-brand-50/60 text-brand-700 dark:border-brand-500 dark:bg-brand-950/40 dark:text-brand-300"
+          : "border-gray-300 bg-gray-50/80 text-gray-600 hover:border-brand-400 hover:bg-brand-50/40 hover:text-brand-700 dark:border-gray-600 dark:bg-gray-900/30 dark:text-gray-400 dark:hover:border-brand-600 dark:hover:text-brand-400"
+      } ${uploading ? "pointer-events-none opacity-60" : ""}`}
+    >
+      <span className="flex size-11 items-center justify-center rounded-full bg-white shadow-sm ring-1 ring-gray-200 dark:bg-gray-900 dark:ring-gray-700">
+        <Upload className="size-5" aria-hidden />
+      </span>
+      <span className="text-sm font-semibold text-gray-800 dark:text-gray-100">
+        {uploading
+          ? "Uploading…"
+          : attachments.length > 0
+            ? "Add another file"
+            : allowMultiple
+              ? "Upload your documents"
+              : "Upload your document"}
+      </span>
+      <span className="max-w-sm text-xs text-gray-500">
+        Drag and drop here, or click to choose · PDF, images, Excel, Word
+      </span>
+      <input
+        type="file"
+        className="sr-only"
+        disabled={uploading}
+        multiple={allowMultiple}
+        accept="image/*,.pdf,.xlsx,.xls,.csv,.doc,.docx"
+        onChange={(e) => {
+          void handleFiles(e.target.files);
+          e.target.value = "";
+        }}
+      />
+    </label>
+  ) : null;
 
   const addTile = showAddTile ? (
     <label
@@ -102,17 +180,26 @@ export default function FileAttachmentField({
   ) : null;
 
   return (
-    <div className="sm:col-span-2">
+    <div className={className ?? "sm:col-span-2"}>
       {label ? label : null}
 
-      <div className="mt-2">
-        <FileAttachmentTileGrid
-          files={attachments}
-          readOnly={readOnly}
-          onOpen={setPreviewFile}
-          onRemove={readOnly ? undefined : remove}
-          addTile={addTile}
-        />
+      <div
+        className={
+          uploadStyle === "banner" ? "mt-2 space-y-3" : "mt-2"
+        }
+      >
+        {uploadStyle === "banner" && attachments.length === 0 ? bannerUpload : null}
+        {(attachments.length > 0 || uploadStyle === "tile") && (
+          <FileAttachmentTileGrid
+            files={attachments}
+            readOnly={readOnly}
+            onOpen={setPreviewFile}
+            onRemove={readOnly ? undefined : remove}
+            addTile={addTile}
+            emptyMessage={emptyMessage}
+          />
+        )}
+        {uploadStyle === "banner" && attachments.length > 0 ? bannerUpload : null}
       </div>
 
       {uploadError ? (
@@ -123,8 +210,14 @@ export default function FileAttachmentField({
 
       {!readOnly && attachments.length > 0 ? (
         <p className="mt-2 text-xs text-gray-500">
-          Click a tile to preview · use the × badge to remove
+          {uploadStyle === "banner"
+            ? "Tap a file to preview · use the × to remove"
+            : "Click a tile to preview · use the × badge to remove"}
         </p>
+      ) : null}
+
+      {readOnly && attachments.length > 0 && readOnlyHint ? (
+        <p className="mt-2 text-xs text-gray-500">{readOnlyHint}</p>
       ) : null}
 
       <FilePreviewModal

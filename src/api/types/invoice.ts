@@ -61,6 +61,8 @@ export type OfficeInvoiceResponse = {
   referenceNumber: string;
   customerId?: string | null;
   customerName?: string | null;
+  engagementId?: string | null;
+  engagementTitle?: string | null;
   billToName: string;
   billToEmail: string;
   issueDate: string;
@@ -118,6 +120,7 @@ export type InvoiceLineItemRequest = {
 
 export type CreateOfficeInvoiceRequest = {
   customerId?: string;
+  engagementId?: string;
   billToName: string;
   billToEmail: string;
   issueDate: string;
@@ -137,4 +140,8 @@ export type MarkInvoicePaidRequest = {
   amount?: number;
   paidAt?: string;
   note?: string;
+};
+
+export type SendOfficeInvoiceRequest = {
+  sendEmail?: boolean;
 };

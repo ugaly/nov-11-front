@@ -2,6 +2,7 @@
 
 import type {
   WorkItemFieldDefinition,
+  WorkItemFieldGroup,
   WorkItemFieldValue,
 } from "@/api/types/work-item-template";
 import Button from "@/components/ui/button/Button";
@@ -9,9 +10,12 @@ import DatePicker from "@/components/form/date-picker";
 import Input from "@/components/form/input/InputField";
 import Label from "@/components/form/Label";
 import FileAttachmentField from "@/components/setup/FileAttachmentField";
+import FormFieldGroupSection from "@/components/setup/FormFieldGroupSection";
 import type { WorkItemFileAttachment } from "@/api/types/work-item-template";
 import { useToast } from "@/context/ToastContext";
-import { Check, Copy, Link2 } from "lucide-react";
+import { isStaffOnlyFileWidget } from "@/lib/field-widget-meta";
+import { buildFieldLayout } from "@/lib/work-item-field-layout";
+import { Check, Copy, FileText } from "lucide-react";
 import { useCallback, useEffect, useState } from "react";
 
 const inputClass =
@@ -19,6 +23,7 @@ const inputClass =
 
 export default function TaskFieldForm({
   fields,
+  groups = [],
   values,
   savedAt,
   readOnly,
@@ -29,8 +34,10 @@ export default function TaskFieldForm({
   onSave,
   hideActions,
   registerGetValues,
+  isPublicForm = false,
 }: {
   fields: WorkItemFieldDefinition[];
+  groups?: WorkItemFieldGroup[];
   values: WorkItemFieldValue[];
   savedAt: string | null;
   readOnly?: boolean;
@@ -45,6 +52,8 @@ export default function TaskFieldForm({
   /** Hide save row — parent handles submit (e.g. closure flow). */
   hideActions?: boolean;
   registerGetValues?: (getter: () => WorkItemFieldValue[]) => void;
+  /** Customer-facing shared link — staff document fields are view-only. */
+  isPublicForm?: boolean;
 }) {
   const [draft, setDraft] = useState<Record<string, WorkItemFieldValue>>({});
   const [saving, setSaving] = useState(false);
@@ -52,6 +61,7 @@ export default function TaskFieldForm({
   const [linkUrl, setLinkUrl] = useState<string | null>(formLinkUrl ?? null);
   const [linkLoading, setLinkLoading] = useState(false);
   const { showError, showSuccess } = useToast();
+  const sections = buildFieldLayout(fields, groups);
 
   useEffect(() => {
     setLinkUrl(formLinkUrl ?? null);
@@ -117,60 +127,84 @@ export default function TaskFieldForm({
 
   const body = (
     <>
-      <div className="flex flex-wrap items-center justify-between gap-2">
-        <p className="text-xs font-medium uppercase tracking-wide text-gray-500">
-          Capture data
-        </p>
-        {savedAt ? (
-          <p className="text-xs text-gray-400">
-            Last saved {new Date(savedAt).toLocaleString()}
+      {!isPublicForm ? (
+        <div className="flex flex-wrap items-center justify-between gap-2">
+          <p className="text-xs font-medium uppercase tracking-wide text-gray-500">
+            Capture data
           </p>
-        ) : null}
-      </div>
+          {savedAt ? (
+            <p className="text-xs text-gray-400">
+              Last saved {new Date(savedAt).toLocaleString()}
+            </p>
+          ) : null}
+        </div>
+      ) : null}
 
-      <div className="flex flex-wrap items-center gap-2 rounded-lg border border-dashed border-brand-200 bg-brand-50/40 px-3 py-2 dark:border-brand-800 dark:bg-brand-950/25">
-        <span className="text-xs text-gray-600 dark:text-gray-400">
-          Customer form:
-        </span>
-        <code className="max-w-[min(100%,14rem)] truncate text-xs text-brand-700 dark:text-brand-300">
-          {linkUrl ?? "—"}
-        </code>
-        <button
-          type="button"
-          onClick={() => void copyLink()}
-          disabled={linkLoading}
-          className="inline-flex items-center gap-1 rounded-md px-2 py-1 text-xs font-medium text-brand-600 hover:bg-brand-100 dark:hover:bg-brand-900/40"
-        >
-          {copied ? (
-            <Check className="size-3.5" aria-hidden />
-          ) : (
-            <Copy className="size-3.5" aria-hidden />
-          )}
-          {linkLoading
-            ? "Creating…"
-            : copied
-              ? "Copied"
-              : linkUrl
-                ? "Copy"
-                : "Create & copy"}
-        </button>
-      </div>
+      {!isPublicForm ? (
+        <div className="flex flex-wrap items-center gap-2 rounded-lg border border-dashed border-brand-200 bg-brand-50/40 px-3 py-2 dark:border-brand-800 dark:bg-brand-950/25">
+          <span className="text-xs text-gray-600 dark:text-gray-400">
+            Customer form:
+          </span>
+          <code className="max-w-[min(100%,14rem)] truncate text-xs text-brand-700 dark:text-brand-300">
+            {linkUrl ?? "—"}
+          </code>
+          <button
+            type="button"
+            onClick={() => void copyLink()}
+            disabled={linkLoading}
+            className="inline-flex items-center gap-1 rounded-md px-2 py-1 text-xs font-medium text-brand-600 hover:bg-brand-100 dark:hover:bg-brand-900/40"
+          >
+            {copied ? (
+              <Check className="size-3.5" aria-hidden />
+            ) : (
+              <Copy className="size-3.5" aria-hidden />
+            )}
+            {linkLoading
+              ? "Creating…"
+              : copied
+                ? "Copied"
+                : linkUrl
+                  ? "Copy"
+                  : "Create & copy"}
+          </button>
+        </div>
+      ) : null}
 
-      <div className="grid gap-4 sm:grid-cols-2">
-        {fields.map((field) => (
-          <FieldInput
-            key={field.id}
-            field={field}
-            value={draft[field.id]}
-            readOnly={readOnly}
-            onChange={(patch) => setValue(field.id, patch)}
-            onUploadFieldFile={
-              onUploadFieldFile
-                ? (file) => onUploadFieldFile(field.id, file)
-                : undefined
-            }
-          />
-        ))}
+      <div className="space-y-6">
+        {sections.map((section) => {
+          const fieldInputs = section.fields.map((field) => (
+            <FieldInput
+              key={field.id}
+              field={field}
+              value={draft[field.id]}
+              readOnly={readOnly}
+              isPublicForm={isPublicForm}
+              onChange={(patch) => setValue(field.id, patch)}
+              onUploadFieldFile={
+                onUploadFieldFile
+                  ? (file) => onUploadFieldFile(field.id, file)
+                  : undefined
+              }
+            />
+          ));
+
+          if (section.kind === "group" && section.group?.name) {
+            return (
+              <FormFieldGroupSection
+                key={section.group.id}
+                title={section.group.name}
+              >
+                {fieldInputs}
+              </FormFieldGroupSection>
+            );
+          }
+
+          return (
+            <section key="ungrouped">
+              <div className="grid gap-4 sm:grid-cols-2">{fieldInputs}</div>
+            </section>
+          );
+        })}
       </div>
 
       {!hideActions ? (
@@ -207,22 +241,33 @@ function FieldInput({
   field,
   value,
   readOnly,
+  isPublicForm = false,
   onChange,
   onUploadFieldFile,
 }: {
   field: WorkItemFieldDefinition;
   value?: WorkItemFieldValue;
   readOnly?: boolean;
+  isPublicForm?: boolean;
   onChange: (patch: Partial<WorkItemFieldValue>) => void;
   onUploadFieldFile?: (file: File) => Promise<WorkItemFileAttachment>;
 }) {
+  const isStaffDocument = field.widget === "INTERNAL_FILE";
+  const staffViewOnPublic = isStaffDocument && isPublicForm;
+
   const label = (
     <Label>
       {field.label}
       {field.required ? <span className="text-error-500"> *</span> : null}
+      {isStaffDocument && !isPublicForm ? (
+        <span className="ml-1.5 text-[10px] font-normal uppercase tracking-wide text-gray-400">
+          Staff
+        </span>
+      ) : null}
     </Label>
   );
-  const disabled = !!readOnly;
+  const disabled =
+    !!readOnly || (isPublicForm && isStaffOnlyFileWidget(field.widget));
 
   switch (field.widget) {
     case "TEXT":
@@ -317,16 +362,86 @@ function FieldInput({
         </label>
       );
     case "FILE":
-      return (
+    case "INTERNAL_FILE": {
+      const customerUploadOnPublic =
+        isPublicForm && field.widget === "FILE" && !disabled;
+
+      const fileField = (
         <FileAttachmentField
-          label={label}
+          label={staffViewOnPublic ? null : label}
           value={value}
           readOnly={disabled}
           allowMultiple={field.allowMultiple}
           onChange={onChange}
           onUploadFile={onUploadFieldFile}
+          uploadStyle={customerUploadOnPublic ? "banner" : "tile"}
+          emptyMessage={
+            staffViewOnPublic ? (
+              <div className="flex items-start gap-3 rounded-xl border border-dashed border-gray-200 bg-gray-50/90 px-4 py-3.5 dark:border-gray-700 dark:bg-gray-900/40">
+                <FileText
+                  className="mt-0.5 size-5 shrink-0 text-gray-400"
+                  aria-hidden
+                />
+                <div>
+                  <p className="text-sm font-medium text-gray-700 dark:text-gray-200">
+                    No document attached yet
+                  </p>
+                  <p className="mt-0.5 text-xs text-gray-500">
+                    Your service team will add this when it is ready.
+                  </p>
+                </div>
+              </div>
+            ) : undefined
+          }
+          readOnlyHint={
+            staffViewOnPublic ? "Tap a document to open preview." : undefined
+          }
+          className={
+            staffViewOnPublic || customerUploadOnPublic
+              ? undefined
+              : isStaffDocument
+                ? "sm:col-span-2"
+                : undefined
+          }
         />
       );
+
+      if (staffViewOnPublic) {
+        return (
+          <div className="sm:col-span-2">
+            <div className="rounded-xl border border-brand-200/80 bg-brand-50/40 p-4 dark:border-brand-900/50 dark:bg-brand-950/20">
+              <div className="mb-3 flex items-start justify-between gap-3">
+                <div>
+                  {label}
+                  <p className="mt-0.5 text-xs text-gray-500">
+                    Shared by your service team — view only
+                  </p>
+                </div>
+                <span className="shrink-0 rounded-full bg-white/80 px-2 py-0.5 text-[10px] font-semibold uppercase tracking-wide text-brand-700 ring-1 ring-brand-200 dark:bg-brand-950/60 dark:text-brand-300 dark:ring-brand-800">
+                  View only
+                </span>
+              </div>
+              {fileField}
+            </div>
+          </div>
+        );
+      }
+
+      return (
+        <div
+          className={
+            isStaffDocument || customerUploadOnPublic ? "sm:col-span-2" : undefined
+          }
+        >
+          {fileField}
+          {isStaffDocument ? (
+            <p className="mt-1 text-xs text-gray-500">
+              Customers can view this on shared links but cannot change it.
+            </p>
+          ) : null}
+        </div>
+      );
+    }
     case "CUSTOMER_LINK":
       return (
         <div>

@@ -1,6 +1,11 @@
 "use client";
 
 import { getApiErrorMessage } from "@/api/errors";
+import {
+  listMailMessages,
+  listMailTemplates,
+  sendOutboundMail,
+} from "@/api/mail/mail.api";
 import { getCustomer, listCustomers } from "@/api/template-config/template-config.api";
 import type { CustomerListItemResponse } from "@/api/types/template-config";
 import SetupEmptyState from "@/components/setup/SetupEmptyState";
@@ -24,17 +29,18 @@ import {
   TableRow,
 } from "@/components/ui/table";
 import { useCompanyContext } from "@/hooks/useCompanyContext";
-import { getAccessToken } from "@/lib/auth-storage";
-import {
-  MAIL_HISTORY_SEED,
-  MAIL_TEMPLATES,
-} from "@/lib/mail/mail-dummy-data";
+import { useGeneralAccess } from "@/lib/general/use-general-access";
 import type {
+  LetterComposeDetails,
   MailChannel,
   MailDeliveryStatus,
   MailHistoryRow,
   MailTemplate,
 } from "@/lib/mail/mail-types";
+import {
+  isLetterTemplate,
+  letterDetailsFromTemplate,
+} from "@/lib/mail/letter-template";
 import {
   AlertCircle,
   CheckCircle2,
@@ -55,6 +61,9 @@ type MailFilters = {
 
 const selectClass =
   "h-11 w-full rounded-lg border border-gray-300 bg-transparent px-4 text-sm text-gray-800 shadow-theme-xs dark:border-gray-700 dark:bg-gray-900 dark:text-white/90";
+
+const textareaClass =
+  "mt-1.5 w-full rounded-lg border border-gray-300 bg-white px-4 py-2.5 text-sm text-gray-800 shadow-theme-xs focus:border-brand-300 focus:outline-none focus:ring-2 focus:ring-brand-500/20 dark:border-gray-700 dark:bg-gray-900 dark:text-white/90";
 
 const STATUS_LABELS: Record<MailDeliveryStatus, string> = {
   SENT: "Sent",
@@ -96,8 +105,13 @@ export default function MailPanel() {
 }
 
 function MailList() {
-  const { companyId, companyName } = useCompanyContext();
-  const [rows, setRows] = useState<MailHistoryRow[]>(MAIL_HISTORY_SEED);
+  const { companyId } = useCompanyContext();
+  const { access: generalAccess } = useGeneralAccess();
+  const canSendMail = Boolean(generalAccess?.canSendMail);
+  const [rows, setRows] = useState<MailHistoryRow[]>([]);
+  const [templates, setTemplates] = useState<MailTemplate[]>([]);
+  const [loadingHistory, setLoadingHistory] = useState(false);
+  const [historyError, setHistoryError] = useState<string | null>(null);
   const [filters, setFilters] = useState<MailFilters>({
     search: "",
     status: "",
@@ -107,6 +121,25 @@ function MailList() {
   const [loadingCustomers, setLoadingCustomers] = useState(false);
   const [customerError, setCustomerError] = useState<string | null>(null);
   const [composeOpen, setComposeOpen] = useState(false);
+
+  useEffect(() => {
+    if (!companyId) return;
+    setLoadingHistory(true);
+    setHistoryError(null);
+    void listMailMessages(companyId)
+      .then((items) => setRows(items))
+      .catch((err) =>
+        setHistoryError(getApiErrorMessage(err, "Could not load mail history."))
+      )
+      .finally(() => setLoadingHistory(false));
+  }, [companyId]);
+
+  useEffect(() => {
+    if (!companyId) return;
+    void listMailTemplates(companyId)
+      .then((items) => setTemplates(items))
+      .catch(() => setTemplates([]));
+  }, [companyId]);
 
   useEffect(() => {
     if (!companyId) return;
@@ -185,11 +218,28 @@ function MailList() {
                 {filtered.length} of {rows.length} messages
               </p>
             </div>
-            <Button type="button" size="sm" onClick={() => setComposeOpen(true)}>
+            <Button
+              type="button"
+              size="sm"
+              disabled={!canSendMail}
+              onClick={() => setComposeOpen(true)}
+            >
               <Plus className="mr-1.5 size-4" aria-hidden />
               Send mail
             </Button>
           </div>
+
+          {!canSendMail ? (
+            <p className="border-b border-gray-100 px-5 py-3 text-xs text-amber-700 dark:border-gray-800 dark:text-amber-300">
+              You can view mail history but do not have permission to send messages.
+            </p>
+          ) : null}
+
+          {historyError ? (
+            <p className="border-b border-gray-100 px-5 py-3 text-xs text-error-600 dark:border-gray-800">
+              {historyError}
+            </p>
+          ) : null}
 
           <div className="grid gap-4 border-b border-gray-100 p-5 dark:border-gray-800 md:grid-cols-4">
             <div className="md:col-span-2">
@@ -247,16 +297,22 @@ function MailList() {
           </div>
 
           <div className={setupListTableSectionClass}>
-            {filtered.length === 0 ? (
+            {loadingHistory ? (
+              <p className="px-5 py-8 text-center text-sm text-gray-500">
+                Loading mail history…
+              </p>
+            ) : filtered.length === 0 ? (
               <SetupEmptyState
                 icon={Mail}
                 title="No messages found"
                 description="Adjust filters or send a new message."
                 action={
-                  <Button type="button" size="sm" onClick={() => setComposeOpen(true)}>
-                    <SendHorizonal className="mr-1.5 size-4" aria-hidden />
-                    Compose
-                  </Button>
+                  canSendMail ? (
+                    <Button type="button" size="sm" onClick={() => setComposeOpen(true)}>
+                      <SendHorizonal className="mr-1.5 size-4" aria-hidden />
+                      Compose
+                    </Button>
+                  ) : undefined
                 }
               />
             ) : (
@@ -315,64 +371,30 @@ function MailList() {
       <ComposeMailModal
         open={composeOpen}
         companyId={companyId}
+        templates={templates}
         customers={customers}
         loadingCustomers={loadingCustomers}
         customerError={customerError}
         onClose={() => setComposeOpen(false)}
         onSend={async (payload) => {
-          let status: MailDeliveryStatus = "QUEUED";
-          if (payload.channel === "EMAIL") {
-            const token = getAccessToken();
-            if (!token) {
-              alert("Session expired. Please sign in again.");
-              return "FAILED";
-            }
-            try {
-              const res = await fetch("/api/send-mail", {
-                method: "POST",
-                headers: {
-                  "Content-Type": "application/json",
-                  Authorization: `Bearer ${token}`,
-                },
-                body: JSON.stringify({
-                  to: payload.recipient,
-                  subject: payload.subject,
-                  message: payload.body,
-                  templateId: payload.templateId,
-                  companyName: companyName ?? "Company",
-                }),
-              });
-              const data = (await res.json().catch(() => ({}))) as {
-                message?: string;
-                error?: string;
-              };
-              if (!res.ok) {
-                throw new Error(data.message ?? data.error ?? "Could not send email.");
-              }
-              status = "SENT";
-            } catch (err) {
-              alert(err instanceof Error ? err.message : "Could not send email.");
-              status = "FAILED";
-            }
-          } else {
-            const text = payload.body.trim();
-            const wa = `https://wa.me/?text=${encodeURIComponent(text)}`;
-            window.open(wa, "_blank");
-            status = "SENT";
+          if (!companyId) return "FAILED";
+          try {
+            const row = await sendOutboundMail(companyId, {
+              recipient: payload.recipient,
+              customerName: payload.customerName,
+              templateId: payload.templateId,
+              templateName: payload.templateName,
+              channel: payload.channel,
+              subject: payload.subject,
+              body: payload.body,
+              letterDetails: payload.letterDetails,
+            });
+            setRows((prev) => [row, ...prev]);
+            return row.status;
+          } catch (err) {
+            alert(getApiErrorMessage(err, "Could not send message."));
+            return "FAILED";
           }
-
-          const next: MailHistoryRow = {
-            id: `mail_${Date.now()}`,
-            sentAt: new Date().toISOString(),
-            recipient: payload.recipient,
-            customerName: payload.customerName,
-            templateName: payload.templateName,
-            channel: payload.channel,
-            subject: payload.subject,
-            status,
-          };
-          setRows((prev) => [next, ...prev]);
-          return status;
         }}
       />
     </>
@@ -382,6 +404,7 @@ function MailList() {
 function ComposeMailModal({
   open,
   companyId,
+  templates,
   customers,
   loadingCustomers,
   customerError,
@@ -390,6 +413,7 @@ function ComposeMailModal({
 }: {
   open: boolean;
   companyId: string | null;
+  templates: MailTemplate[];
   customers: CustomerListItemResponse[];
   loadingCustomers: boolean;
   customerError: string | null;
@@ -402,13 +426,22 @@ function ComposeMailModal({
     channel: MailChannel;
     subject: string;
     body: string;
+    letterDetails?: LetterComposeDetails;
   }) => Promise<MailDeliveryStatus>;
 }) {
-  const [templateId, setTemplateId] = useState(MAIL_TEMPLATES[0]!.id);
+  const defaultTemplate = templates[0];
+  const [templateId, setTemplateId] = useState(defaultTemplate?.id ?? "generic");
   const [recipient, setRecipient] = useState("");
   const [channel, setChannel] = useState<MailChannel>("EMAIL");
-  const [subject, setSubject] = useState(MAIL_TEMPLATES[0]!.subject);
-  const [body, setBody] = useState(MAIL_TEMPLATES[0]!.body);
+  const [subject, setSubject] = useState(defaultTemplate?.subject ?? "");
+  const [body, setBody] = useState(defaultTemplate?.body ?? "");
+  const [letterContactEmail, setLetterContactEmail] = useState("");
+  const [letterContactPhone, setLetterContactPhone] = useState("");
+  const [letterContactAddress, setLetterContactAddress] = useState("");
+  const [letterRecipientAddress, setLetterRecipientAddress] = useState("");
+  const [letterReLine, setLetterReLine] = useState("");
+  const [letterSignatoryName, setLetterSignatoryName] = useState("");
+  const [letterSignatoryTitle, setLetterSignatoryTitle] = useState("");
   const [sending, setSending] = useState(false);
   const [enrichedRecipients, setEnrichedRecipients] = useState<
     {
@@ -422,9 +455,39 @@ function ComposeMailModal({
 
   const selectedTemplate: MailTemplate = useMemo(
     () =>
-      MAIL_TEMPLATES.find((t) => t.id === templateId) ?? MAIL_TEMPLATES[0]!,
-    [templateId]
+      templates.find((t) => t.id === templateId) ??
+      templates[0] ?? {
+        id: "generic",
+        name: "General message",
+        subject: "Message from your service team",
+        body: "",
+      },
+    [templateId, templates]
   );
+
+  const isLetter = isLetterTemplate(selectedTemplate.id);
+
+  function applyTemplate(template: MailTemplate) {
+    setSubject(template.subject);
+    setBody(template.body);
+    if (isLetterTemplate(template.id)) {
+      const letter = letterDetailsFromTemplate(template);
+      setLetterContactEmail(letter.contactEmail);
+      setLetterContactPhone(letter.contactPhone);
+      setLetterContactAddress(letter.contactAddress);
+      setLetterRecipientAddress(letter.recipientAddress);
+      setLetterReLine(letter.reLine ?? "");
+      setLetterSignatoryName(letter.signatoryName ?? "");
+      setLetterSignatoryTitle(letter.signatoryTitle ?? "");
+    }
+  }
+
+  useEffect(() => {
+    if (!open || !templates.length) return;
+    const first = templates[0]!;
+    setTemplateId(first.id);
+    applyTemplate(first);
+  }, [open, templates]);
 
   useEffect(() => {
     if (!open || !companyId || customers.length === 0) {
@@ -488,11 +551,6 @@ function ComposeMailModal({
       });
   }, [channel, enrichedRecipients]);
 
-  useEffect(() => {
-    setSubject(selectedTemplate.subject);
-    setBody(selectedTemplate.body);
-  }, [selectedTemplate]);
-
   function resolveCustomerNameForSend(to: string): string | undefined {
     const trimmed = to.trim();
     if (channel === "EMAIL") {
@@ -529,6 +587,17 @@ function ComposeMailModal({
         channel,
         subject: subject.trim() || selectedTemplate.subject,
         body: body.trim() || selectedTemplate.body,
+        letterDetails: isLetter
+          ? {
+              contactEmail: letterContactEmail.trim(),
+              contactPhone: letterContactPhone.trim(),
+              contactAddress: letterContactAddress.trim(),
+              recipientAddress: letterRecipientAddress.trim(),
+              reLine: letterReLine.trim() || undefined,
+              signatoryName: letterSignatoryName.trim() || undefined,
+              signatoryTitle: letterSignatoryTitle.trim() || undefined,
+            }
+          : undefined,
       });
       onClose();
     } finally {
@@ -558,9 +627,15 @@ function ComposeMailModal({
             <select
               className={`${selectClass} mt-1.5`}
               value={templateId}
-              onChange={(e) => setTemplateId(e.target.value)}
+              onChange={(e) => {
+                const id = e.target.value;
+                setTemplateId(id);
+                const next =
+                  templates.find((t) => t.id === id) ?? selectedTemplate;
+                applyTemplate(next);
+              }}
             >
-              {MAIL_TEMPLATES.map((t) => (
+              {templates.map((t) => (
                 <option key={t.id} value={t.id}>
                   {t.name}
                 </option>
@@ -584,7 +659,7 @@ function ComposeMailModal({
         </div>
 
         <div>
-          <Label>Recipient (search customer or type custom)</Label>
+          <Label>{isLetter ? "Send to (email)" : "Recipient (search customer or type custom)"}</Label>
           <input
             list="mail-recipient-customers"
             value={recipient}
@@ -614,29 +689,119 @@ function ComposeMailModal({
           ) : null}
         </div>
 
+        {isLetter ? (
+          <div className="space-y-4 rounded-xl border border-gray-200 bg-gray-50/60 p-4 dark:border-gray-700 dark:bg-gray-900/30">
+            <p className="text-xs font-semibold uppercase tracking-wide text-gray-500">
+              Letterhead (editable)
+            </p>
+            <div className="grid gap-4 sm:grid-cols-2">
+              <div>
+                <Label>Contact email</Label>
+                <Input
+                  value={letterContactEmail}
+                  onChange={(e) => setLetterContactEmail(e.target.value)}
+                  className="mt-1.5"
+                />
+              </div>
+              <div>
+                <Label>Contact phone</Label>
+                <Input
+                  value={letterContactPhone}
+                  onChange={(e) => setLetterContactPhone(e.target.value)}
+                  className="mt-1.5"
+                />
+              </div>
+            </div>
+            <div>
+              <Label>Office address (letterhead)</Label>
+              <textarea
+                rows={5}
+                value={letterContactAddress}
+                onChange={(e) => setLetterContactAddress(e.target.value)}
+                className={textareaClass}
+              />
+            </div>
+            <div>
+              <Label>Recipient address (on letter)</Label>
+              <textarea
+                rows={4}
+                value={letterRecipientAddress}
+                onChange={(e) => setLetterRecipientAddress(e.target.value)}
+                placeholder="DIRECTOR&#10;ORGANISATION&#10;P O BOX …&#10;CITY"
+                className={textareaClass}
+              />
+            </div>
+            <div className="grid gap-4 sm:grid-cols-2">
+              <div>
+                <Label>Subject line</Label>
+                <Input
+                  value={subject}
+                  onChange={(e) => setSubject(e.target.value)}
+                  placeholder='e.g. CLIENT NAME "The Firm"'
+                  className="mt-1.5"
+                />
+              </div>
+              <div>
+                <Label>Re: line</Label>
+                <Input
+                  value={letterReLine}
+                  onChange={(e) => setLetterReLine(e.target.value)}
+                  placeholder="Re: Registered Office"
+                  className="mt-1.5"
+                />
+              </div>
+            </div>
+          </div>
+        ) : (
+          <div>
+            <Label>Subject</Label>
+            <Input
+              value={subject}
+              onChange={(e) => setSubject(e.target.value)}
+              placeholder="Message subject"
+              className="mt-1.5"
+            />
+          </div>
+        )}
+
         <div>
-          <Label>Subject</Label>
-          <Input
-            value={subject}
-            onChange={(e) => setSubject(e.target.value)}
-            placeholder="Message subject"
-            className="mt-1.5"
+          <Label>{isLetter ? "Letter body" : "Message"}</Label>
+          <textarea
+            rows={isLetter ? 14 : 9}
+            value={body}
+            onChange={(e) => setBody(e.target.value)}
+            className={textareaClass}
           />
         </div>
 
-        <div>
-          <Label>Message</Label>
-          <textarea
-            rows={9}
-            value={body}
-            onChange={(e) => setBody(e.target.value)}
-            className="mt-1.5 w-full rounded-lg border border-gray-300 bg-white px-4 py-2.5 text-sm text-gray-800 shadow-theme-xs focus:border-brand-300 focus:outline-none focus:ring-2 focus:ring-brand-500/20 dark:border-gray-700 dark:bg-gray-900 dark:text-white/90"
-          />
-        </div>
+        {isLetter ? (
+          <div className="grid gap-4 sm:grid-cols-2">
+            <div>
+              <Label>Signatory name</Label>
+              <Input
+                value={letterSignatoryName}
+                onChange={(e) => setLetterSignatoryName(e.target.value)}
+                className="mt-1.5"
+              />
+            </div>
+            <div>
+              <Label>Signatory title</Label>
+              <Input
+                value={letterSignatoryTitle}
+                onChange={(e) => setLetterSignatoryTitle(e.target.value)}
+                className="mt-1.5"
+              />
+            </div>
+          </div>
+        ) : null}
 
         <p className="flex items-center gap-1.5 text-xs text-gray-500">
           <AlertCircle className="size-3.5" aria-hidden />
-          You can fully edit template content before sending.
+          {isLetter
+            ? "Formal letter layout with logo in the email — edit all fields before sending."
+            : channel === "WHATSAPP"
+              ? "WhatsApp is queued on the server — delivery integration is coming soon."
+              : "You can fully edit template content before sending."}
         </p>
 
         <div className="flex flex-wrap justify-end gap-2 border-t border-gray-200 pt-4 dark:border-gray-700">

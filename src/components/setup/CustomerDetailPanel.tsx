@@ -386,6 +386,8 @@ export default function CustomerDetailPanel({
             companyId={companyId}
             fixedCustomerId={customerId}
             fixedCustomerName={customer.name}
+            officeId={customer.officeId}
+            customerEmail={customer.contactEmail}
             onClose={() => setEngagementModalOpen(false)}
             onCreated={(created) => {
               setEngagementModalOpen(false);

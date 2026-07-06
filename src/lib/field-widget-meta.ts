@@ -16,7 +16,12 @@ export const BUILDER_WIDGET_OPTIONS: {
   {
     value: "FILE",
     label: "Documents",
-    hint: "Upload one or more files",
+    hint: "Customer can upload on shared form links",
+  },
+  {
+    value: "INTERNAL_FILE",
+    label: "Staff document",
+    hint: "You upload; customer can view only on shared links",
   },
   { value: "CHECKBOX", label: "Yes / No", hint: "Confirmation checkbox" },
   {
@@ -30,6 +35,15 @@ export const BUILDER_WIDGET_OPTIONS: {
     hint: "Show or collect linked customer data",
   },
 ];
+
+export function isFileWidget(widget: WorkItemFieldWidgetType): boolean {
+  return widget === "FILE" || widget === "INTERNAL_FILE";
+}
+
+/** Customer-facing public forms cannot edit staff document fields. */
+export function isStaffOnlyFileWidget(widget: WorkItemFieldWidgetType): boolean {
+  return widget === "INTERNAL_FILE";
+}
 
 export function widgetLabel(widget: WorkItemFieldWidgetType): string {
   return (

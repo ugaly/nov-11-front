@@ -16,6 +16,7 @@ import { useEffect, useRef, useState } from "react";
 export default function TaskClosureForm({
   status,
   fields,
+  groups = [],
   values,
   savedAt,
   workItemId,
@@ -37,6 +38,7 @@ export default function TaskClosureForm({
 }: {
   status: ClosureStatus;
   fields: WorkItemFieldDefinition[];
+  groups?: import("@/api/types/work-item-template").WorkItemFieldGroup[];
   values: WorkItemFieldValue[];
   savedAt: string | null;
   workItemId: string;
@@ -102,6 +104,7 @@ export default function TaskClosureForm({
           ) : null}
           <TaskFieldForm
             fields={fields}
+            groups={groups}
             values={values}
             savedAt={savedAt}
             readOnly={responsesLocked ?? false}
@@ -122,7 +125,11 @@ export default function TaskClosureForm({
         <textarea
           rows={3}
           value={draftRemark}
-          onChange={(e) => setDraftRemark(e.target.value)}
+          onChange={(e) => {
+            const next = e.target.value;
+            setDraftRemark(next);
+            onRemarkChange(next);
+          }}
           disabled={responsesLocked}
           placeholder={`Why is this task ${statusLabel(status).toLowerCase()}?`}
           className="mt-1.5 w-full rounded-lg border border-gray-300 bg-white px-3 py-2 text-sm shadow-theme-xs focus:border-brand-300 focus:outline-none focus:ring-2 focus:ring-brand-500/20 dark:border-gray-700 dark:bg-gray-900 dark:text-white/90"

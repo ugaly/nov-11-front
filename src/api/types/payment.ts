@@ -21,6 +21,7 @@ export type PaymentReferenceDto = {
 };
 
 export type PaymentReminderSchedule =
+  | "TWO_DAYS_BEFORE"
   | "ONE_WEEK_BEFORE"
   | "TWO_WEEKS_BEFORE"
   | "ONE_MONTH_BEFORE"

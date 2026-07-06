@@ -50,6 +50,10 @@ import Label from "@/components/form/Label";
 import { Modal } from "@/components/ui/modal";
 import { getAccessToken } from "@/lib/auth-storage";
 import { formatMoneyTotals } from "@/lib/format-money";
+import {
+  engagementBillingStatusClass,
+  formatEngagementBillingStatus,
+} from "@/lib/customers/customer-engagement-billing";
 import { isAdminUser } from "@/lib/is-admin";
 import { useGeneralAccess } from "@/lib/general/use-general-access";
 import {
@@ -475,7 +479,7 @@ function CustomerList({
                   {[
                     { label: "Customer", className: "w-[26%]" },
                     { label: "Contact", className: "w-[18%]" },
-                    { label: "Engagements", className: "w-[14%]" },
+                    { label: "Charge & payment", className: "w-[14%]" },
                     { label: "Services", className: "w-[22%]" },
                     { label: "Total value", className: "w-[14%]" },
                     { label: "", className: "w-[6%] text-right" },
@@ -637,10 +641,17 @@ function CustomerRow({
           {c.contactPhone ?? "—"}
         </SetupContactLine>
       </TableCell>
-      <TableCell
-        className={`${setupListTdClass} tabular-nums text-gray-700 dark:text-gray-300`}
-      >
-        {c.totalEngagementCount}
+      <TableCell className={`${setupListTdClass} align-top`}>
+        <div className="space-y-0.5">
+          <p className="tabular-nums font-medium text-gray-900 dark:text-white">
+            {formatMoneyTotals(c.engagementBilling?.chargeTotals ?? [])}
+          </p>
+          <p
+            className={`text-xs ${engagementBillingStatusClass(c.engagementBilling)}`}
+          >
+            {formatEngagementBillingStatus(c.engagementBilling)}
+          </p>
+        </div>
       </TableCell>
       <TableCell className={`${setupListTdClass} overflow-visible`}>
         <CategoriesCell categories={c.categories} compact />
@@ -758,6 +769,7 @@ function CustomerFormModal({
   const [contactPhone, setContactPhone] = useState("");
   const [city, setCity] = useState("");
   const [country, setCountry] = useState("TZ");
+  const [sendWelcomeEmail, setSendWelcomeEmail] = useState(true);
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
@@ -769,6 +781,7 @@ function CustomerFormModal({
       setContactPhone("");
       setCity("");
       setCountry("TZ");
+      setSendWelcomeEmail(true);
       setError(null);
     }
   }, [open]);
@@ -790,6 +803,7 @@ function CustomerFormModal({
         contactPhone: contactPhone.trim() || undefined,
         city: city.trim() || undefined,
         country: country.trim() || undefined,
+        sendWelcomeEmail,
       });
       onCreated();
     } catch (err) {
@@ -836,6 +850,41 @@ function CustomerFormModal({
             <Label>Country</Label>
             <Input value={country} onChange={(e) => setCountry(e.target.value)} />
           </div>
+        </div>
+        <div className="space-y-2 rounded-lg border border-gray-200 p-4 dark:border-gray-700">
+          <Label className="mb-0">Send welcome message</Label>
+          <p className="text-xs text-gray-500">
+            When this customer gets their first engagement, email a welcome
+            message with the selected service. Later engagements send a
+            congratulations message instead.
+          </p>
+          <div className="flex flex-wrap gap-4 pt-1">
+            <label className="flex cursor-pointer items-center gap-2 text-sm text-gray-800 dark:text-white/90">
+              <input
+                type="radio"
+                name="send-welcome-email"
+                checked={sendWelcomeEmail}
+                onChange={() => setSendWelcomeEmail(true)}
+                className="size-4 border-gray-300"
+              />
+              Yes — send on first engagement
+            </label>
+            <label className="flex cursor-pointer items-center gap-2 text-sm text-gray-800 dark:text-white/90">
+              <input
+                type="radio"
+                name="send-welcome-email"
+                checked={!sendWelcomeEmail}
+                onChange={() => setSendWelcomeEmail(false)}
+                className="size-4 border-gray-300"
+              />
+              No automated messages
+            </label>
+          </div>
+          {sendWelcomeEmail && !contactEmail.trim() ? (
+            <p className="text-xs text-amber-700 dark:text-amber-300">
+              Add a contact email so the welcome message can be delivered.
+            </p>
+          ) : null}
         </div>
         <div className="flex justify-end gap-2">
           <Button type="button" variant="outline" size="sm" onClick={onClose}>

@@ -1,7 +1,6 @@
 "use client";
 
 import type { RecurrenceType } from "@/api/types/template-config";
-import DatePicker from "@/components/form/date-picker";
 import Label from "@/components/form/Label";
 import Input from "@/components/form/input/InputField";
 import {
@@ -29,7 +28,7 @@ export default function RecurrenceFields({
   return (
     <div className="space-y-4 rounded-lg border border-gray-200 p-4 dark:border-gray-700">
       <p className="text-xs font-medium uppercase tracking-wide text-gray-500">
-        Recurrence & offering dates
+        Recurrence
       </p>
       <div>
         <Label>Recurrence type *</Label>
@@ -91,23 +90,6 @@ export default function RecurrenceFields({
           </div>
         </div>
       ) : null}
-
-      <div className="grid gap-4 sm:grid-cols-2">
-        <DatePicker
-          id="catalog-effective-from"
-          label="Offering from"
-          placeholder="Start date"
-          value={value.catalogEffectiveFrom}
-          onValueChange={(catalogEffectiveFrom) => set({ catalogEffectiveFrom })}
-        />
-        <DatePicker
-          id="catalog-effective-to"
-          label="Offering to"
-          placeholder="End date"
-          value={value.catalogEffectiveTo}
-          onValueChange={(catalogEffectiveTo) => set({ catalogEffectiveTo })}
-        />
-      </div>
     </div>
   );
 }

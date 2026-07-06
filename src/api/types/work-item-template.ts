@@ -10,6 +10,7 @@ export type WorkItemFieldWidgetType =
   | "RADIO"
   | "CHECKBOX"
   | "FILE"
+  | "INTERNAL_FILE"
   | "TABLE"
   | "CUSTOMER_LINK";
 
@@ -30,6 +31,12 @@ export interface WorkItemFieldOption {
   label: string;
 }
 
+export interface WorkItemFieldGroup {
+  id: string;
+  name: string;
+  sortOrder?: number;
+}
+
 export interface WorkItemFieldDefinition {
   id: string;
   label: string;
@@ -37,6 +44,8 @@ export interface WorkItemFieldDefinition {
   widget: WorkItemFieldWidgetType;
   required?: boolean;
   sortOrder?: number;
+  /** Optional layout group for display in forms and exports. */
+  groupId?: string | null;
   /** For SELECT / RADIO */
   options?: WorkItemFieldOption[];
   /** Pre-fill or show customer data when present */

@@ -11,8 +11,11 @@ import {
   suggestEngagementPeriods,
 } from "@/api/template-config/template-config.api";
 import type {
+  CreateEngagementRequest,
   CustomerEngagementResponse,
   CustomerListItemResponse,
+  Currency,
+  EngagementInvoiceSummary,
   PeriodSuggestionDto,
   ServiceCatalogNodeResponse,
   ServiceCatalogResponse,
@@ -24,13 +27,28 @@ import Button from "@/components/ui/button/Button";
 import Input from "@/components/form/input/InputField";
 import Label from "@/components/form/Label";
 import { Modal } from "@/components/ui/modal";
+import { useTemplateOptions } from "@/hooks/useTemplateOptions";
 import {
   engagementRequiresPeriodStart,
-  formatNodeRecurrence,
   nodeRecurrenceType,
-  recurrenceHint,
 } from "@/lib/template-recurrence";
+import { appendPricingFields } from "@/lib/template-pricing";
+import { listGeneralPermissions } from "@/api/general/general.api";
+import type { GeneralPermissionDto } from "@/api/types/general";
+import EngagementPaymentReminderSection from "@/components/setup/EngagementPaymentReminderSection";
+import {
+  sanitizeReminders,
+  type ReminderEntry,
+} from "@/lib/reminders/reminder-types";
 import { useEffect, useMemo, useState } from "react";
+
+function todayIsoDate(): string {
+  const now = new Date();
+  const y = now.getFullYear();
+  const m = String(now.getMonth() + 1).padStart(2, "0");
+  const d = String(now.getDate()).padStart(2, "0");
+  return `${y}-${m}-${d}`;
+}
 
 const selectClass =
   "h-11 w-full rounded-lg border border-gray-300 bg-transparent px-4 text-sm text-gray-800 shadow-theme-xs dark:border-gray-700 dark:bg-gray-900 dark:text-white/90";
@@ -91,6 +109,17 @@ function toPeriodDrafts(suggestions: PeriodSuggestionDto[]): PeriodDraft[] {
   }));
 }
 
+function defaultEngagementPrice(catalog: ServiceCatalogResponse | null): {
+  price: string;
+  currency: Currency;
+} {
+  const pricing = catalog?.pricing;
+  return {
+    price: pricing?.price != null ? String(pricing.price) : "",
+    currency: pricing?.currency ?? "TZS",
+  };
+}
+
 export default function EngagementFormModal({
   open,
   companyId,
@@ -98,6 +127,8 @@ export default function EngagementFormModal({
   onCreated,
   fixedCustomerId,
   fixedCustomerName,
+  officeId: fixedOfficeId,
+  customerEmail: fixedCustomerEmail,
 }: {
   open: boolean;
   companyId: string;
@@ -105,6 +136,8 @@ export default function EngagementFormModal({
   onCreated: (engagement: CustomerEngagementResponse) => void;
   fixedCustomerId?: string;
   fixedCustomerName?: string;
+  officeId?: string | null;
+  customerEmail?: string | null;
 }) {
   const [customers, setCustomers] = useState<CustomerListItemResponse[]>([]);
   const [categories, setCategories] = useState<ServiceCategoryResponse[]>([]);
@@ -120,13 +153,30 @@ export default function EngagementFormModal({
   const [periodStart, setPeriodStart] = useState("");
   const [periodEnd, setPeriodEnd] = useState("");
   const [periodDrafts, setPeriodDrafts] = useState<PeriodDraft[]>([]);
+  const [price, setPrice] = useState("");
+  const [currency, setCurrency] = useState<Currency>("TZS");
+  const [paymentReminders, setPaymentReminders] = useState<ReminderEntry[]>([]);
+  const [reminderRecipientIds, setReminderRecipientIds] = useState<string[]>([]);
+  const [createInvoice, setCreateInvoice] = useState(true);
+  const [officeUsers, setOfficeUsers] = useState<GeneralPermissionDto[]>([]);
+  const [loadingOfficeUsers, setLoadingOfficeUsers] = useState(false);
   const [loadingPeriods, setLoadingPeriods] = useState(false);
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [assignedCatalogIds, setAssignedCatalogIds] = useState<string[]>([]);
   const [loadingAssignments, setLoadingAssignments] = useState(false);
 
+  const { currencies } = useTemplateOptions(companyId);
+
   const resolvedCustomerId = fixedCustomerId ?? customerId;
+
+  const resolvedOfficeId = useMemo(() => {
+    if (fixedOfficeId) return fixedOfficeId;
+    const selected = customers.find((c) => c.id === customerId);
+    return selected?.officeId ?? null;
+  }, [fixedOfficeId, customers, customerId]);
+
+  const resolvedCustomerEmail = fixedCustomerEmail ?? null;
 
   const excludedCatalogIds = useMemo(
     () => new Set(assignedCatalogIds),
@@ -165,6 +215,12 @@ export default function EngagementFormModal({
   const recurringSelected = selectedRoots.filter(
     (n) => nodeRecurrenceType(n) !== "ONE_OFF"
   );
+  const hasRecurringRoot = recurringSelected.length > 0;
+  const isOneOffEngagement =
+    selectedRoots.length > 0
+      ? !hasRecurringRoot
+      : !catalogDetail?.recurrenceType ||
+        catalogDetail.recurrenceType === "ONE_OFF";
   const configurePeriodsAtCreate =
     selectedRoots.length === 1 && recurringSelected.length === 1;
   const singleRecurringRoot = configurePeriodsAtCreate
@@ -172,11 +228,12 @@ export default function EngagementFormModal({
     : undefined;
   const recurrenceType = singleRecurringRoot
     ? nodeRecurrenceType(singleRecurringRoot)
-    : "ONE_OFF";
+    : recurringSelected[0]
+      ? nodeRecurrenceType(recurringSelected[0])
+      : "ONE_OFF";
   const isRecurring = configurePeriodsAtCreate;
-  const needsPeriodStart = engagementRequiresPeriodStart(
-    configurePeriodsAtCreate ? recurrenceType : "ONE_OFF"
-  );
+  const needsPeriodStart =
+    !isOneOffEngagement && engagementRequiresPeriodStart(recurrenceType);
 
   useEffect(() => {
     if (!open) return;
@@ -237,6 +294,12 @@ export default function EngagementFormModal({
       setPeriodDrafts([]);
       setCatalogDetail(null);
       setSelectedRootIds([]);
+      setPrice("");
+      setCurrency("TZS");
+      setPaymentReminders([]);
+      setReminderRecipientIds([]);
+      setCreateInvoice(true);
+      setOfficeUsers([]);
       setError(null);
       setAssignedCatalogIds([]);
     }
@@ -313,6 +376,40 @@ export default function EngagementFormModal({
   }, [open, catalogId, companyId]);
 
   useEffect(() => {
+    if (!open || !catalogDetail) return;
+    const defaults = defaultEngagementPrice(catalogDetail);
+    setPrice(defaults.price);
+    setCurrency(defaults.currency);
+  }, [open, catalogDetail?.id, catalogDetail?.pricing?.price, catalogDetail?.pricing?.currency]);
+
+  useEffect(() => {
+    if (!open || !isOneOffEngagement) return;
+    setPeriodStart((prev) => prev || todayIsoDate());
+  }, [open, isOneOffEngagement, catalogId]);
+
+  useEffect(() => {
+    if (!open || !resolvedOfficeId) {
+      setOfficeUsers([]);
+      return;
+    }
+    let cancelled = false;
+    setLoadingOfficeUsers(true);
+    void (async () => {
+      try {
+        const users = await listGeneralPermissions(resolvedOfficeId);
+        if (!cancelled) setOfficeUsers(users);
+      } catch {
+        if (!cancelled) setOfficeUsers([]);
+      } finally {
+        if (!cancelled) setLoadingOfficeUsers(false);
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [open, resolvedOfficeId]);
+
+  useEffect(() => {
     if (!open || !companyId || !catalogId || !singleRecurringRoot) {
       setPeriodDrafts([]);
       return;
@@ -357,12 +454,6 @@ export default function EngagementFormModal({
     periodStart,
   ]);
 
-  function toggleRoot(id: string) {
-    setSelectedRootIds((prev) =>
-      prev.includes(id) ? prev.filter((x) => x !== id) : [...prev, id]
-    );
-  }
-
   function updatePeriodLabel(index: number, label: string) {
     setPeriodDrafts((prev) =>
       prev.map((p, i) => (i === index ? { ...p, label } : p))
@@ -384,6 +475,43 @@ export default function EngagementFormModal({
       setError("Cycle anchor is required for the recurring group.");
       return;
     }
+    if (!isOneOffEngagement && hasRecurringRoot && !configurePeriodsAtCreate && needsPeriodStart && !periodStart.trim()) {
+      setError("Cycle anchor is required for recurring service groups.");
+      return;
+    }
+    if (price.trim() && !currency) {
+      setError("Currency is required when price is set.");
+      return;
+    }
+    if (isOneOffEngagement) {
+      if (!periodStart.trim()) {
+        setError("Period start is required for one-off engagements.");
+        return;
+      }
+      if (!periodEnd.trim()) {
+        setError("Period end is required for one-off engagements.");
+        return;
+      }
+      if (periodEnd.trim() < periodStart.trim()) {
+        setError("Period end must be on or after period start.");
+        return;
+      }
+    }
+    const sanitizedReminders = sanitizeReminders(paymentReminders);
+    if (sanitizedReminders.length > 0 && reminderRecipientIds.length === 0) {
+      setError("Select at least one recipient for payment reminders.");
+      return;
+    }
+    if (createInvoice) {
+      if (!price.trim() || Number.parseFloat(price) <= 0) {
+        setError("Set a price on the engagement to create an invoice.");
+        return;
+      }
+      if (!resolvedCustomerEmail?.trim()) {
+        setError("Customer email is required to create an invoice.");
+        return;
+      }
+    }
     if (excludedCatalogIds.has(catalogId)) {
       setError("This customer already has an engagement for that service catalog.");
       return;
@@ -392,31 +520,48 @@ export default function EngagementFormModal({
     setError(null);
     try {
       const useMultiRoot = rootGroups.length > 1;
-      const created = await createEngagement(companyId, {
-        customerId: resolvedCustomerId,
-        catalogId,
-        catalogEntryNodeId:
-          !useMultiRoot && selectedRootIds.length === 1
-            ? selectedRootIds[0]
+      const payload: CreateEngagementRequest = {
+          customerId: resolvedCustomerId,
+          catalogId,
+          catalogEntryNodeId:
+            !useMultiRoot && selectedRootIds.length === 1
+              ? selectedRootIds[0]
+              : undefined,
+          includedRootNodeIds: useMultiRoot ? selectedRootIds : undefined,
+          title: title.trim(),
+          description: description.trim() || undefined,
+          periodStart: periodStart.trim() || undefined,
+          periodEnd: !configurePeriodsAtCreate
+            ? periodEnd.trim() || undefined
             : undefined,
-        includedRootNodeIds: useMultiRoot ? selectedRootIds : undefined,
-        title: title.trim(),
-        description: description.trim() || undefined,
-        periodStart: periodStart.trim() || undefined,
-        periodEnd: !configurePeriodsAtCreate
-          ? periodEnd.trim() || undefined
-          : undefined,
-        periods:
-          configurePeriodsAtCreate && periodDrafts.length > 0
-          ? periodDrafts.map((p) => ({
-              catalogNodeId: singleRecurringRoot!.id,
-              label: p.label.trim() || p.periodStart,
-              periodStart: p.periodStart,
-              periodEnd: p.periodEnd,
-              sortOrder: p.sortOrder,
-            }))
-          : undefined,
+          periods:
+            configurePeriodsAtCreate && periodDrafts.length > 0
+              ? periodDrafts.map((p) => ({
+                  catalogNodeId: singleRecurringRoot!.id,
+                  label: p.label.trim() || p.periodStart,
+                  periodStart: p.periodStart,
+                  periodEnd: p.periodEnd,
+                  sortOrder: p.sortOrder,
+                }))
+              : undefined,
+          paymentReminders:
+            sanitizedReminders.length > 0
+              ? sanitizedReminders.map((r) => ({
+                  schedule: r.schedule,
+                  customAt: r.at,
+                  note: r.note,
+                  recipientUserIds: reminderRecipientIds,
+                }))
+              : undefined,
+          createInvoice,
+        };
+      appendPricingFields(payload, {
+        price,
+        currency,
+        timelineValue: "",
+        timelineUnit: "DAY",
       });
+      const created = await createEngagement(companyId, payload);
       onCreated(created);
     } catch (err) {
       setError(getApiErrorMessage(err, "Could not create engagement."));
@@ -431,9 +576,8 @@ export default function EngagementFormModal({
         New engagement
       </h3>
       <p className="mt-1 text-xs text-gray-500">
-        Reference number is assigned automatically. Select which root groups to
-        include; configure recurring period tabs when you open the engagement
-        (or now if only one recurring group is selected).
+        Reference number is assigned automatically. Set the customer price and
+        period dates below.
       </p>
       <form className="mt-4 space-y-4" onSubmit={(e) => void handleSubmit(e)}>
         {error ? <p className="text-sm text-error-600">{error}</p> : null}
@@ -533,6 +677,38 @@ export default function EngagementFormModal({
           </select>
         </div>
 
+        <div className="grid gap-4 sm:grid-cols-2">
+          <div>
+            <Label>Price</Label>
+            <Input
+              type="number"
+              value={price}
+              onChange={(e) => setPrice(e.target.value)}
+              placeholder="From service catalog"
+            />
+            <p className="mt-1 text-xs text-gray-500">
+              Defaults to the service catalog price — increase or reduce for this
+              customer.
+            </p>
+          </div>
+          <div>
+            <Label>Currency</Label>
+            <select
+              className={selectClass}
+              value={currency}
+              onChange={(e) => setCurrency(e.target.value as Currency)}
+            >
+              {currencies.map((c) => (
+                <option key={c} value={c}>
+                  {c}
+                </option>
+              ))}
+            </select>
+          </div>
+        </div>
+
+        {/*
+        Root service groups — hidden for now; all root groups are included automatically.
         {rootGroups.length > 0 ? (
           <div className="space-y-2">
             <Label>Root service groups *</Label>
@@ -540,72 +716,48 @@ export default function EngagementFormModal({
               Include one-off and recurring groups together. Period tabs for
               recurring groups can be set when you open the engagement.
             </p>
-            <div className="space-y-2 rounded-lg border border-gray-200 p-3 dark:border-gray-700">
-              {rootGroups.map((n) => {
-                const type = nodeRecurrenceType(n);
-                const checked = selectedRootIds.includes(n.id);
-                return (
-                  <label
-                    key={n.id}
-                    className="flex cursor-pointer items-start gap-3 rounded-lg px-2 py-1.5 hover:bg-gray-50 dark:hover:bg-gray-900/40"
-                  >
-                    <input
-                      type="checkbox"
-                      checked={checked}
-                      onChange={() => toggleRoot(n.id)}
-                      className="mt-1 size-4 rounded border-gray-300"
-                    />
-                    <span className="min-w-0 flex-1">
-                      <span className="block text-sm font-medium text-gray-800 dark:text-white/90">
-                        {n.name}
-                      </span>
-                      <span className="text-xs text-gray-500">
-                        {formatNodeRecurrence(n)}
-                        {type === "ONE_OFF"
-                          ? " · work uses catalog default forms"
-                          : ` · ${recurrenceHint(type)}`}
-                      </span>
-                    </span>
-                  </label>
-                );
-              })}
-            </div>
-            {recurringSelected.length > 1 ? (
-              <p className="text-xs text-brand-600 dark:text-brand-400">
-                Multiple recurring groups selected — configure each group&apos;s
-                period tabs after creating the engagement.
-              </p>
-            ) : null}
+            ...
           </div>
-        ) : catalogId ? (
+        ) : null}
+        */}
+
+        {rootGroups.length === 0 && catalogId ? (
           <p className="text-xs text-amber-700 dark:text-amber-300">
             This catalog has no root GROUP nodes yet. Add one in the catalog
             structure with recurrence configured.
           </p>
         ) : null}
 
-        <DatePicker
-          id="engagement-period-start"
-          label={`Cycle anchor${needsPeriodStart ? " *" : ""}`}
-          placeholder="Select start date"
-          value={periodStart}
-          onValueChange={setPeriodStart}
-        />
-
-        {!isRecurring ? (
-          <div>
+        {isOneOffEngagement ? (
+          <>
+            <DatePicker
+              id="engagement-period-start"
+              label="Period start *"
+              placeholder="Select start date"
+              value={periodStart}
+              onValueChange={setPeriodStart}
+            />
             <DatePicker
               id="engagement-period-end"
-              label="Period end"
+              label="Period end *"
               placeholder="Select end date"
               value={periodEnd}
               onValueChange={setPeriodEnd}
             />
-            <p className="mt-1 text-xs text-gray-500">
-              Optional for one-off engagements (defaults to today).
+            <p className="-mt-2 text-xs text-gray-500">
+              Start defaults to today. Both dates are required for one-off
+              engagements.
             </p>
-          </div>
-        ) : null}
+          </>
+        ) : (
+          <DatePicker
+            id="engagement-period-start"
+            label={`Cycle anchor${needsPeriodStart ? " *" : ""}`}
+            placeholder="Select start date"
+            value={periodStart}
+            onValueChange={setPeriodStart}
+          />
+        )}
 
         {configurePeriodsAtCreate ? (
           <div className="space-y-3 rounded-lg border border-gray-200 p-4 dark:border-gray-700">
@@ -661,6 +813,54 @@ export default function EngagementFormModal({
             onChange={(e) => setDescription(e.target.value)}
           />
         </div>
+
+        <div className="space-y-2 rounded-lg border border-gray-200 p-4 dark:border-gray-700">
+          <Label className="mb-0">Create draft invoice</Label>
+          <p className="text-xs text-gray-500">
+            Link a draft invoice to this engagement so you can track payment
+            status (paid, partial, unpaid) in reports later.
+          </p>
+          <div className="flex flex-wrap gap-4 pt-1">
+            <label className="flex cursor-pointer items-center gap-2 text-sm text-gray-800 dark:text-white/90">
+              <input
+                type="radio"
+                name="create-invoice"
+                checked={createInvoice}
+                onChange={() => setCreateInvoice(true)}
+                className="size-4 border-gray-300"
+              />
+              Yes — create draft invoice
+            </label>
+            <label className="flex cursor-pointer items-center gap-2 text-sm text-gray-800 dark:text-white/90">
+              <input
+                type="radio"
+                name="create-invoice"
+                checked={!createInvoice}
+                onChange={() => setCreateInvoice(false)}
+                className="size-4 border-gray-300"
+              />
+              No invoice now
+            </label>
+          </div>
+          {createInvoice && !resolvedCustomerEmail?.trim() ? (
+            <p className="text-xs text-amber-700 dark:text-amber-300">
+              Add a customer email on the customer record to create an invoice.
+            </p>
+          ) : null}
+        </div>
+
+        {isOneOffEngagement ? (
+          <EngagementPaymentReminderSection
+            reminders={paymentReminders}
+            onRemindersChange={setPaymentReminders}
+            recipientUserIds={reminderRecipientIds}
+            onRecipientsChange={setReminderRecipientIds}
+            officeUsers={officeUsers}
+            periodEnd={periodEnd}
+            loadingUsers={loadingOfficeUsers}
+          />
+        ) : null}
+
         <div className="flex justify-end gap-2">
           <Button type="button" variant="outline" size="sm" onClick={onClose}>
             Cancel
@@ -675,7 +875,9 @@ export default function EngagementFormModal({
               !catalogId ||
               selectedRootIds.length === 0 ||
               catalogsInCategory.length === 0 ||
-              !hasAssignableCatalog
+              !hasAssignableCatalog ||
+              (isOneOffEngagement &&
+                (!periodStart.trim() || !periodEnd.trim()))
             }
           >
             {submitting ? "Creating…" : "Create"}

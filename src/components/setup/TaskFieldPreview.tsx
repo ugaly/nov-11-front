@@ -1,25 +1,53 @@
 "use client";
 
-import type { WorkItemFieldDefinition } from "@/api/types/work-item-template";
+import type {
+  WorkItemFieldDefinition,
+  WorkItemFieldGroup,
+} from "@/api/types/work-item-template";
 import Label from "@/components/form/Label";
+import FormFieldGroupSection from "@/components/setup/FormFieldGroupSection";
+import { buildFieldLayout } from "@/lib/work-item-field-layout";
+import { isFileWidget } from "@/lib/field-widget-meta";
 import { Upload } from "lucide-react";
 
 export default function TaskFieldPreview({
   fields,
+  groups = [],
 }: {
   fields: WorkItemFieldDefinition[];
+  groups?: WorkItemFieldGroup[];
 }) {
   if (!fields.length) return null;
+  const sections = buildFieldLayout(fields, groups);
 
   return (
     <div className="mt-4 space-y-4 border-t border-dashed border-gray-200 pt-4 dark:border-gray-700">
       <p className="text-xs font-medium uppercase tracking-wide text-gray-500">
         Template fields (preview — API pending)
       </p>
-      <div className="grid gap-4 sm:grid-cols-2">
-        {fields.map((field) => (
-          <FieldPreview key={field.id} field={field} />
-        ))}
+      <div className="space-y-5">
+        {sections.map((section) => {
+          const previews = section.fields.map((field) => (
+            <FieldPreview key={field.id} field={field} />
+          ));
+
+          if (section.kind === "group" && section.group?.name) {
+            return (
+              <FormFieldGroupSection
+                key={section.group.id}
+                title={section.group.name}
+              >
+                {previews}
+              </FormFieldGroupSection>
+            );
+          }
+
+          return (
+            <section key="ungrouped">
+              <div className="grid gap-4 sm:grid-cols-2">{previews}</div>
+            </section>
+          );
+        })}
       </div>
     </div>
   );
@@ -110,12 +138,17 @@ function FieldPreview({ field }: { field: WorkItemFieldDefinition }) {
         </label>
       );
     case "FILE":
+    case "INTERNAL_FILE":
       return (
         <div className="sm:col-span-2">
           {label}
           <div className="mt-1.5 flex cursor-not-allowed items-center justify-center gap-2 rounded-lg border border-dashed border-gray-300 bg-gray-50 px-4 py-6 text-sm text-gray-500 dark:border-gray-600 dark:bg-gray-900/30">
             <Upload className="size-4" aria-hidden />
-            {field.allowMultiple ? "Upload one or more files" : "Upload file"}
+            {field.widget === "INTERNAL_FILE"
+              ? "Staff document (view-only for customer)"
+              : field.allowMultiple
+                ? "Upload one or more files"
+                : "Upload file"}
           </div>
         </div>
       );

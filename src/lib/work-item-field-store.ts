@@ -1,8 +1,14 @@
 import type {
   WorkItemFieldDefinition,
+  WorkItemFieldGroup,
   WorkItemFieldValue,
   WorkItemFileAttachment,
 } from "@/api/types/work-item-template";
+import { isFileWidget } from "@/lib/field-widget-meta";
+import {
+  assignFieldLayoutSortOrders,
+  assignGroupSortOrders,
+} from "@/lib/work-item-field-layout";
 import {
   kindFromMimeAndName,
   normalizeAttachmentFromApi,
@@ -10,6 +16,7 @@ import {
 
 export interface WorkItemTemplateState {
   fields: WorkItemFieldDefinition[];
+  groups: WorkItemFieldGroup[];
   configuredAt: string | null;
 }
 
@@ -48,6 +55,7 @@ export function loadWorkItemTemplate(
   return (
     readJson<WorkItemTemplateState>(templateKey(engagementId, workItemId)) ?? {
       fields: [],
+      groups: [],
       configuredAt: null,
     }
   );
@@ -56,10 +64,12 @@ export function loadWorkItemTemplate(
 export function saveWorkItemTemplate(
   engagementId: string,
   workItemId: string,
-  fields: WorkItemFieldDefinition[]
+  fields: WorkItemFieldDefinition[],
+  groups: WorkItemFieldGroup[] = []
 ) {
   writeJson(templateKey(engagementId, workItemId), {
     fields,
+    groups,
     configuredAt: new Date().toISOString(),
   } satisfies WorkItemTemplateState);
 }
@@ -111,31 +121,93 @@ export function newFieldId(): string {
   });
 }
 
+/** Backend `WorkItemFieldGroupDto.id` requires a UUID. */
+export function newGroupId(): string {
+  return newFieldId();
+}
+
+/**
+ * Build PUT payload: keep ids only for fields/groups already on this task's template (from GET).
+ */
+export function prepareTemplateForPut(
+  serverFields: WorkItemFieldDefinition[],
+  serverGroups: WorkItemFieldGroup[],
+  clientFields: WorkItemFieldDefinition[],
+  clientGroups: WorkItemFieldGroup[]
+): { fields: WorkItemFieldDefinition[]; groups: WorkItemFieldGroup[] } {
+  const serverFieldIds = new Set(serverFields.map((f) => f.id));
+  const serverGroupIds = new Set(serverGroups.map((g) => g.id));
+  const usedFieldIds = new Set<string>();
+  const usedGroupIds = new Set<string>();
+
+  const groups = assignGroupSortOrders(
+    clientGroups.map((group) => {
+      const keepServerId =
+        isUuidFieldId(group.id) &&
+        serverGroupIds.has(group.id) &&
+        !usedGroupIds.has(group.id);
+      let id = keepServerId ? group.id : newGroupId();
+      while (usedGroupIds.has(id)) {
+        id = newGroupId();
+      }
+      usedGroupIds.add(id);
+      return { ...group, id, name: group.name.trim() };
+    })
+  );
+
+  const groupIdMap = new Map<string, string>();
+  clientGroups.forEach((group, index) => {
+    groupIdMap.set(group.id, groups[index]?.id ?? group.id);
+  });
+
+  const fields = assignFieldLayoutSortOrders(
+    clientFields.map((field) => {
+      const keepServerId =
+        isUuidFieldId(field.id) &&
+        serverFieldIds.has(field.id) &&
+        !usedFieldIds.has(field.id);
+      let id = keepServerId ? field.id : newFieldId();
+      while (usedFieldIds.has(id)) {
+        id = newFieldId();
+      }
+      usedFieldIds.add(id);
+      const mappedGroupId =
+        field.groupId && groupIdMap.has(field.groupId)
+          ? groupIdMap.get(field.groupId)!
+          : field.groupId && serverGroupIds.has(field.groupId)
+            ? field.groupId
+            : null;
+      return {
+        ...field,
+        id,
+        groupId: mappedGroupId,
+      };
+    }),
+    groups
+  );
+
+  return {
+    fields: ensureUniqueFieldIds(fields),
+    groups,
+  };
+}
+
 /**
  * Build PUT payload: keep ids only for fields already on this task's template (from GET).
  * Any new field gets a fresh UUID so we never INSERT a row that already exists (409 field_id_in_use).
  */
 export function prepareFieldsForTemplatePut(
   serverFields: WorkItemFieldDefinition[],
-  clientFields: WorkItemFieldDefinition[]
+  clientFields: WorkItemFieldDefinition[],
+  serverGroups: WorkItemFieldGroup[] = [],
+  clientGroups: WorkItemFieldGroup[] = []
 ): WorkItemFieldDefinition[] {
-  const serverIds = new Set(serverFields.map((f) => f.id));
-  const used = new Set<string>();
-
-  const prepared = clientFields.map((f, index) => {
-    const keepServerId =
-      isUuidFieldId(f.id) && serverIds.has(f.id) && !used.has(f.id);
-
-    let id = keepServerId ? f.id : newFieldId();
-    while (used.has(id)) {
-      id = newFieldId();
-    }
-    used.add(id);
-
-    return { ...f, id, sortOrder: index };
-  });
-
-  return ensureUniqueFieldIds(prepared);
+  return prepareTemplateForPut(
+    serverFields,
+    serverGroups,
+    clientFields,
+    clientGroups
+  ).fields;
 }
 
 /** Ids repeated in one PUT body (backend returns 400 duplicate_field_id). */
@@ -196,7 +268,7 @@ export function prepareFieldValueForApi(
   if (v.value !== undefined) out.value = v.value;
   if (v.tableRows !== undefined) out.tableRows = v.tableRows;
 
-  if (field?.widget !== "FILE") return out;
+  if (!isFileWidget(field?.widget ?? "TEXT")) return out;
 
   if (v.attachments == null) return out;
 

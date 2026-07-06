@@ -14,6 +14,7 @@ export function useWorkItemOutputFiles(
   companyId: string | null,
   engagementId: string,
   workItemId: string,
+  periodId?: string | null,
   options?: { enabled?: boolean }
 ) {
   const enabled = options?.enabled !== false && Boolean(companyId);
@@ -30,7 +31,8 @@ export function useWorkItemOutputFiles(
       const dtos = await getWorkItemOutputFiles(
         companyId,
         engagementId,
-        workItemId
+        workItemId,
+        periodId
       );
       setFiles(dtos.map(apiFileToAttachment));
     } catch (err) {
@@ -39,7 +41,7 @@ export function useWorkItemOutputFiles(
     } finally {
       setLoading(false);
     }
-  }, [companyId, engagementId, workItemId, enabled]);
+  }, [companyId, engagementId, workItemId, periodId, enabled]);
 
   useEffect(() => {
     void reload();
@@ -55,7 +57,8 @@ export function useWorkItemOutputFiles(
           companyId,
           engagementId,
           workItemId,
-          file
+          file,
+          periodId
         );
         const att = apiFileToAttachment(dto);
         setFiles((prev) => [...prev, att]);
@@ -74,7 +77,7 @@ export function useWorkItemOutputFiles(
         setUploading(false);
       }
     },
-    [companyId, engagementId, workItemId]
+    [companyId, engagementId, workItemId, periodId]
   );
 
   const removeFile = useCallback(
@@ -87,7 +90,8 @@ export function useWorkItemOutputFiles(
           engagementId,
           workItemId,
           fileId,
-          force
+          force,
+          periodId
         );
         setFiles((prev) => prev.filter((f) => f.id !== fileId));
       } catch (err) {
@@ -102,7 +106,7 @@ export function useWorkItemOutputFiles(
         throw new Error(msg);
       }
     },
-    [companyId, engagementId, workItemId]
+    [companyId, engagementId, workItemId, periodId]
   );
 
   return {

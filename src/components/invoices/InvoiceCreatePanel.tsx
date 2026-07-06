@@ -218,7 +218,7 @@ export default function InvoiceCreatePanel() {
           router.push(`/invoices/${invoice.id}`);
           return;
         }
-        invoice = await sendOfficeInvoice(officeId!, invoice.id);
+        invoice = await sendOfficeInvoice(officeId!, invoice.id, { sendEmail: true });
         toast.showSuccess("Invoice created and sent by email.");
       } else {
         toast.showSuccess("Invoice saved as draft.");

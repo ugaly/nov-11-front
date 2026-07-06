@@ -2,13 +2,17 @@
 
 import type {
   WorkItemFieldDefinition,
+  WorkItemFieldGroup,
   WorkItemFieldValue,
   WorkItemFileAttachment,
 } from "@/api/types/work-item-template";
 import ClosureOutputFilesField from "@/components/setup/ClosureOutputFilesField";
 import FileAttachmentField from "@/components/setup/FileAttachmentField";
+import FormFieldGroupSection from "@/components/setup/FormFieldGroupSection";
 import { statusLabel } from "@/components/setup/TaskStatusPicker";
 import { getAttachments } from "@/lib/work-item-file-utils";
+import { isFileWidget } from "@/lib/field-widget-meta";
+import { buildFieldLayout } from "@/lib/work-item-field-layout";
 import type { ClosureStatus } from "@/lib/work-item-closure-store";
 import {
   Ban,
@@ -49,7 +53,8 @@ function formatValue(
   switch (field.widget) {
     case "CHECKBOX":
       return value.value ? "Yes" : "No";
-    case "FILE": {
+    case "FILE":
+    case "INTERNAL_FILE": {
       const files = getAttachments(value);
       return files.length > 0
         ? `${files.length} file${files.length === 1 ? "" : "s"}`
@@ -74,7 +79,7 @@ function formatValue(
 function isWideField(field: WorkItemFieldDefinition) {
   return (
     field.widget === "TEXTAREA" ||
-    field.widget === "FILE" ||
+    isFileWidget(field.widget) ||
     field.widget === "TABLE"
   );
 }
@@ -84,6 +89,7 @@ export default function TaskClosureSummary({
   remark,
   submittedAt,
   fields,
+  groups = [],
   values,
   outputFiles = [],
   onReopen,
@@ -92,6 +98,7 @@ export default function TaskClosureSummary({
   remark: string;
   submittedAt: string;
   fields: WorkItemFieldDefinition[];
+  groups?: WorkItemFieldGroup[];
   values: WorkItemFieldValue[];
   outputFiles?: WorkItemFileAttachment[];
   onReopen?: () => void;
@@ -102,6 +109,92 @@ export default function TaskClosureSummary({
   const hasFields = fields.length > 0;
   const remarkText = remark.trim();
   const hasOutputFiles = outputFiles.length > 0;
+  const sections = buildFieldLayout(fields, groups);
+
+  function renderFieldBlock(field: WorkItemFieldDefinition) {
+    const fieldValue = valueMap[field.id];
+    const display = formatValue(field, fieldValue);
+
+    if (isFileWidget(field.widget)) {
+      const files = getAttachments(fieldValue);
+      return (
+        <div key={field.id} className="space-y-1">
+          <p className="text-xs font-semibold text-gray-700 dark:text-gray-300">
+            {field.label}
+          </p>
+          {files.length ? (
+            <FileAttachmentField
+              label={null}
+              value={fieldValue}
+              readOnly
+              allowMultiple={field.allowMultiple}
+              onChange={() => {}}
+            />
+          ) : (
+            <p className="text-sm text-gray-500">—</p>
+          )}
+        </div>
+      );
+    }
+
+    if (isWideField(field)) {
+      return (
+        <div key={field.id} className="sm:col-span-2 space-y-1">
+          <p className="text-xs font-semibold text-gray-700 dark:text-gray-300">
+            {field.label}
+          </p>
+          <p className="whitespace-pre-wrap text-sm text-gray-800 dark:text-gray-200">
+            {display}
+          </p>
+        </div>
+      );
+    }
+
+    return (
+      <div key={field.id} className="space-y-1">
+        <p className="text-xs font-medium text-gray-600 dark:text-gray-400">
+          {field.label}
+        </p>
+        <p className="text-sm text-gray-800 dark:text-gray-200">{display}</p>
+      </div>
+    );
+  }
+
+  function renderCapturedResponses() {
+    if (!hasFields) {
+      return (
+        <p className="text-xs text-gray-500 italic">
+          No field responses configured for this task.
+        </p>
+      );
+    }
+
+    return (
+      <div className="space-y-4">
+        {sections.map((section) => {
+          if (section.kind === "group" && section.group?.name) {
+            return (
+              <FormFieldGroupSection
+                key={section.group.id}
+                title={section.group.name}
+              >
+                {section.fields.map((field) => renderFieldBlock(field))}
+              </FormFieldGroupSection>
+            );
+          }
+
+          return (
+            <div
+              key="ungrouped"
+              className="grid gap-4 sm:grid-cols-2"
+            >
+              {section.fields.map((field) => renderFieldBlock(field))}
+            </div>
+          );
+        })}
+      </div>
+    );
+  }
 
   return (
     <div className="overflow-hidden rounded-xl border border-gray-200 dark:border-gray-700">
@@ -140,112 +233,19 @@ export default function TaskClosureSummary({
             </td>
           </tr>
 
-          {hasFields ? (
-            <>
-              <tr className="bg-brand-50/40 dark:bg-brand-950/20">
-                <th
-                  colSpan={2}
-                  className="px-4 py-2 text-left text-xs font-semibold uppercase tracking-wide text-brand-700 dark:text-brand-300"
-                >
-                  Captured responses
-                </th>
-              </tr>
-              {fields.flatMap((field) => {
-                const fieldValue = valueMap[field.id];
-                const display = formatValue(field, fieldValue);
-
-                if (field.widget === "FILE") {
-                  const files = getAttachments(fieldValue);
-                  if (!files.length) {
-                    return [
-                      <tr key={field.id} className="bg-white dark:bg-gray-900/20">
-                        <th
-                          scope="row"
-                          className="w-[38%] px-4 py-2.5 text-left text-xs font-medium text-gray-600 dark:text-gray-400"
-                        >
-                          {field.label}
-                        </th>
-                        <td className="px-4 py-2.5 text-gray-500">—</td>
-                      </tr>,
-                    ];
-                  }
-                  return [
-                    <tr
-                      key={`${field.id}-label`}
-                      className="bg-white dark:bg-gray-900/20"
-                    >
-                      <th
-                        colSpan={2}
-                        className="border-t border-gray-100 px-4 pt-3 pb-1 text-left text-xs font-semibold text-gray-600 dark:border-gray-800 dark:text-gray-400"
-                      >
-                        {field.label}
-                      </th>
-                    </tr>,
-                    <tr
-                      key={`${field.id}-files`}
-                      className="bg-white dark:bg-gray-900/20"
-                    >
-                      <td colSpan={2} className="px-4 pb-4 pt-1">
-                        <FileAttachmentField
-                          label={null}
-                          value={fieldValue}
-                          readOnly
-                          allowMultiple={field.allowMultiple}
-                          onChange={() => {}}
-                        />
-                      </td>
-                    </tr>,
-                  ];
-                }
-
-                if (isWideField(field)) {
-                  return [
-                    <tr
-                      key={`${field.id}-label`}
-                      className="bg-white dark:bg-gray-900/20"
-                    >
-                      <th
-                        colSpan={2}
-                        className="border-t border-gray-100 px-4 pt-3 pb-1 text-left text-xs font-semibold text-gray-600 dark:border-gray-800 dark:text-gray-400"
-                      >
-                        {field.label}
-                      </th>
-                    </tr>,
-                    <tr key={`${field.id}-value`} className="bg-white dark:bg-gray-900/20">
-                      <td
-                        colSpan={2}
-                        className="whitespace-pre-wrap px-4 pt-0 pb-3 text-gray-800 dark:text-gray-200"
-                      >
-                        {display}
-                      </td>
-                    </tr>,
-                  ];
-                }
-                return [
-                  <tr key={field.id} className="bg-white dark:bg-gray-900/20">
-                    <th
-                      scope="row"
-                      className="w-[38%] px-4 py-2.5 text-left text-xs font-medium text-gray-600 dark:text-gray-400"
-                    >
-                      {field.label}
-                    </th>
-                    <td className="px-4 py-2.5 text-gray-800 dark:text-gray-200">
-                      {display}
-                    </td>
-                  </tr>,
-                ];
-              })}
-            </>
-          ) : (
-            <tr className="bg-white dark:bg-gray-900/20">
-              <td
-                colSpan={2}
-                className="px-4 py-3 text-xs text-gray-500 italic"
-              >
-                No field responses configured for this task.
-              </td>
-            </tr>
-          )}
+          <tr className="bg-brand-50/40 dark:bg-brand-950/20">
+            <th
+              colSpan={2}
+              className="px-4 py-2 text-left text-xs font-semibold uppercase tracking-wide text-brand-700 dark:text-brand-300"
+            >
+              Captured responses
+            </th>
+          </tr>
+          <tr className="bg-white dark:bg-gray-900/20">
+            <td colSpan={2} className="px-4 py-4">
+              {renderCapturedResponses()}
+            </td>
+          </tr>
 
           <tr className="bg-gray-50/80 dark:bg-gray-900/40">
             <th

@@ -191,11 +191,13 @@ export async function patchWorkItemStatus(
   companyId: string,
   engagementId: string,
   workItemId: string,
-  body: { status: EngagementWorkItemResponse["status"] }
+  body: { status: EngagementWorkItemResponse["status"] },
+  periodId?: string | null
 ): Promise<EngagementWorkItemResponse> {
   const { data } = await apiClient.patch<EngagementWorkItemResponse>(
     workItemBase(companyId, engagementId, workItemId),
-    body
+    body,
+    { params: periodParams(periodId) }
   );
   return data;
 }
@@ -246,10 +248,12 @@ export async function postWorkItemClosureReopen(
 export async function getWorkItemOutputFiles(
   companyId: string,
   engagementId: string,
-  workItemId: string
+  workItemId: string,
+  periodId?: string | null
 ): Promise<WorkItemFileDto[]> {
   const { data } = await apiClient.get<WorkItemFileDto[]>(
-    `${workItemBase(companyId, engagementId, workItemId)}/output-files`
+    `${workItemBase(companyId, engagementId, workItemId)}/output-files`,
+    { params: periodParams(periodId) }
   );
   return data;
 }
@@ -258,13 +262,15 @@ export async function postWorkItemOutputFile(
   companyId: string,
   engagementId: string,
   workItemId: string,
-  file: File
+  file: File,
+  periodId?: string | null
 ): Promise<WorkItemFileDto> {
   const form = new FormData();
   form.append("file", file);
   const { data } = await apiClient.post<WorkItemFileDto>(
     `${workItemBase(companyId, engagementId, workItemId)}/output-files`,
-    form
+    form,
+    { params: periodParams(periodId) }
   );
   return data;
 }
@@ -274,11 +280,17 @@ export async function deleteWorkItemOutputFile(
   engagementId: string,
   workItemId: string,
   fileId: string,
-  force = false
+  force = false,
+  periodId?: string | null
 ): Promise<void> {
   await apiClient.delete(
     `${workItemBase(companyId, engagementId, workItemId)}/output-files/${fileId}`,
-    { params: force ? { force: true } : undefined }
+    {
+      params: {
+        ...(force ? { force: true } : {}),
+        ...periodParams(periodId),
+      },
+    }
   );
 }
 

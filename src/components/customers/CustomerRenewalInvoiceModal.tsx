@@ -150,6 +150,7 @@ export default function CustomerRenewalInvoiceModal({
     try {
       let invoice = await createOfficeInvoice(officeId, {
         customerId,
+        engagementId: selected?.id,
         billToName: customerName.trim(),
         billToEmail: customerEmail.trim(),
         issueDate,
@@ -172,7 +173,7 @@ export default function CustomerRenewalInvoiceModal({
           router.push(`/invoices/${invoice.id}`);
           return;
         }
-        invoice = await sendOfficeInvoice(officeId, invoice.id);
+        invoice = await sendOfficeInvoice(officeId, invoice.id, { sendEmail: true });
         toast.showSuccess("Renewal invoice created and sent.");
       } else {
         toast.showSuccess("Renewal invoice saved as draft.");

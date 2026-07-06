@@ -7,6 +7,8 @@ export type MailHtmlTemplateId =
   | "invoice-reminder"
   | "engagement-followup"
   | "document-request"
+  | "customer-welcome"
+  | "customer-new-service"
   /** Branded wrapper for manual PDF form sends. */
   | "form-attachment"
   | "generic";
@@ -61,6 +63,22 @@ const THEMES: Record<MailHtmlTemplateId, Theme> = {
     pillBg: "#fef3c7",
     pillText: "#92400e",
     badgeLabel: "Documents",
+  },
+  "customer-welcome": {
+    accent: "#0891b2",
+    accentSoft: "#ecfeff",
+    stripe: "#0e7490",
+    pillBg: "#cffafe",
+    pillText: "#155e75",
+    badgeLabel: "Welcome",
+  },
+  "customer-new-service": {
+    accent: "#4f46e5",
+    accentSoft: "#eef2ff",
+    stripe: "#4338ca",
+    pillBg: "#e0e7ff",
+    pillText: "#3730a3",
+    badgeLabel: "New service",
   },
   "form-attachment": {
     accent: "#0d9488",

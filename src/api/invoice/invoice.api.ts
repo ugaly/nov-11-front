@@ -6,6 +6,7 @@ import type {
   InvoiceRecipientSearchResult,
   MarkInvoicePaidRequest,
   OfficeInvoiceResponse,
+  SendOfficeInvoiceRequest,
   UpdateOfficeInvoiceRequest,
   UpsertInvoicePermissionRequest,
 } from "../types/invoice";
@@ -94,10 +95,12 @@ export async function updateOfficeInvoice(
 
 export async function sendOfficeInvoice(
   officeId: string,
-  invoiceId: string
+  invoiceId: string,
+  body: SendOfficeInvoiceRequest = { sendEmail: true }
 ): Promise<OfficeInvoiceResponse> {
   const { data } = await apiClient.post<OfficeInvoiceResponse>(
-    `/api/offices/${officeId}/invoices/${invoiceId}/send`
+    `/api/offices/${officeId}/invoices/${invoiceId}/send`,
+    { sendEmail: body.sendEmail !== false }
   );
   return data;
 }

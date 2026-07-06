@@ -1,39 +1,33 @@
-import { getAccessToken } from "@/lib/auth-storage";
+import { sendOutboundMail } from "@/api/mail/mail.api";
+import type { LetterComposeDetails, MailChannel } from "@/api/types/mail";
 
 export type SendMailClientPayload = {
+  companyId: string;
   to: string;
   subject: string;
   message: string;
+  channel?: MailChannel;
   templateId?: string;
-  companyName?: string;
+  templateName?: string;
+  customerId?: string;
+  customerName?: string;
   cc?: string;
-  pdfFilename?: string;
-  pdfBase64?: string;
+  letterDetails?: LetterComposeDetails;
 };
 
 export async function sendMailViaApi(
   payload: SendMailClientPayload
 ): Promise<void> {
-  const token = getAccessToken();
-  if (!token) {
-    throw new Error("Session expired. Please sign in again.");
-  }
-
-  const res = await fetch("/api/send-mail", {
-    method: "POST",
-    headers: {
-      "Content-Type": "application/json",
-      Authorization: `Bearer ${token}`,
-    },
-    body: JSON.stringify(payload),
+  await sendOutboundMail(payload.companyId, {
+    recipient: payload.to.trim(),
+    customerId: payload.customerId,
+    customerName: payload.customerName,
+    templateId: payload.templateId ?? "generic",
+    templateName: payload.templateName ?? "General message",
+    channel: payload.channel ?? "EMAIL",
+    subject: payload.subject.trim() || "Message",
+    body: payload.message.trim(),
+    cc: payload.cc?.trim() || undefined,
+    letterDetails: payload.letterDetails,
   });
-
-  const data = (await res.json().catch(() => ({}))) as {
-    message?: string;
-    error?: string;
-  };
-
-  if (!res.ok) {
-    throw new Error(data.message ?? data.error ?? "Could not send email.");
-  }
 }

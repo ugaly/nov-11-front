@@ -14,6 +14,7 @@ function fieldValueHasData(
     case "CHECKBOX":
       return Boolean(value.value);
     case "FILE":
+    case "INTERNAL_FILE":
       return getAttachments(value).length > 0;
     case "TABLE":
       return (value.tableRows?.length ?? 0) > 0;
@@ -48,7 +49,8 @@ export function formatFieldValueForExport(
   switch (field.widget) {
     case "CHECKBOX":
       return value.value ? "Yes" : "No";
-    case "FILE": {
+    case "FILE":
+    case "INTERNAL_FILE": {
       const files = getAttachments(value);
       if (!files.length) return "—";
       return files.map((f) => f.name).join(", ");

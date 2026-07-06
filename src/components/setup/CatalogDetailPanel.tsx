@@ -85,6 +85,9 @@ export default function CatalogDetailPanel({ catalogId }: { catalogId: string })
   const [defaultFields, setDefaultFields] = useState<WorkItemFieldDefinition[]>(
     []
   );
+  const [defaultGroups, setDefaultGroups] = useState<
+    import("@/api/types/work-item-template").WorkItemFieldGroup[]
+  >([]);
   const [defaultFormLoading, setDefaultFormLoading] = useState(false);
 
   const load = useCallback(async () => {
@@ -122,10 +125,12 @@ export default function CatalogDetailPanel({ catalogId }: { catalogId: string })
     if (!companyId) return;
     setDefaultFormTarget({ nodeId, nodeName });
     setDefaultFields([]);
+    setDefaultGroups([]);
     setDefaultFormLoading(true);
     try {
       const res = await getTaskDefaultFormTemplate(companyId, catalogId, nodeId);
       setDefaultFields(res.fields ?? []);
+      setDefaultGroups(res.groups ?? []);
     } catch {
       setDefaultFields([]);
     } finally {
@@ -317,13 +322,14 @@ export default function CatalogDetailPanel({ catalogId }: { catalogId: string })
             onClose={() => setDefaultFormTarget(null)}
             taskName={`${defaultFormTarget.nodeName} (default form)`}
             initialFields={defaultFields}
-            onSave={async (fields) => {
+            initialGroups={defaultGroups}
+            onSave={async ({ fields, groups }) => {
               if (!companyId) return;
               await putTaskDefaultFormTemplate(
                 companyId,
                 catalogId,
                 defaultFormTarget.nodeId,
-                { fields }
+                { fields, groups }
               );
               setDefaultFormTarget(null);
             }}

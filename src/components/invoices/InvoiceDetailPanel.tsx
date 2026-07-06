@@ -156,7 +156,9 @@ export default function InvoiceDetailPanel({ invoiceId }: { invoiceId: string })
       inv.status === "PAID");
   const canMarkPaid =
     access.canMarkPaid &&
-    (inv.status === "SENT" || inv.status === "PARTIALLY_PAID");
+    (inv.status === "DRAFT" ||
+      inv.status === "SENT" ||
+      inv.status === "PARTIALLY_PAID");
   const canVoid =
     inv.status !== "PAID" &&
     inv.status !== "PARTIALLY_PAID" &&
@@ -164,7 +166,10 @@ export default function InvoiceDetailPanel({ invoiceId }: { invoiceId: string })
     (isCreator || access.canSend);
 
   const pendingHint =
-    (inv.status === "SENT" || inv.status === "PARTIALLY_PAID") && !canMarkPaid
+    (inv.status === "DRAFT" ||
+      inv.status === "SENT" ||
+      inv.status === "PARTIALLY_PAID") &&
+    !canMarkPaid
       ? "You need Mark paid permission to record customer payments."
       : null;
 
@@ -248,18 +253,32 @@ export default function InvoiceDetailPanel({ invoiceId }: { invoiceId: string })
             Download PDF
           </Button>
           {canSend ? (
-            <Button
-              size="sm"
-              disabled={busy}
-              onClick={() =>
-                void runAction("Invoice sent by email.", () =>
-                  sendOfficeInvoice(officeId!, inv.id)
-                )
-              }
-            >
-              <Send className="mr-1.5 size-4" aria-hidden />
-              Send email
-            </Button>
+            <>
+              <Button
+                size="sm"
+                variant="outline"
+                disabled={busy}
+                onClick={() =>
+                  void runAction("Invoice issued (no email).", () =>
+                    sendOfficeInvoice(officeId!, inv.id, { sendEmail: false })
+                  )
+                }
+              >
+                Mark as issued
+              </Button>
+              <Button
+                size="sm"
+                disabled={busy}
+                onClick={() =>
+                  void runAction("Invoice issued and emailed.", () =>
+                    sendOfficeInvoice(officeId!, inv.id, { sendEmail: true })
+                  )
+                }
+              >
+                <Send className="mr-1.5 size-4" aria-hidden />
+                Issue & email
+              </Button>
+            </>
           ) : null}
           {canResend ? (
             <Button
@@ -267,13 +286,13 @@ export default function InvoiceDetailPanel({ invoiceId }: { invoiceId: string })
               variant="outline"
               disabled={busy}
               onClick={() =>
-                void runAction("Invoice resent by email.", () =>
+                void runAction("Invoice emailed to customer.", () =>
                   resendOfficeInvoice(officeId!, inv.id)
                 )
               }
             >
               <RotateCcw className="mr-1.5 size-4" aria-hidden />
-              Resend email
+              Send email
             </Button>
           ) : null}
           {canMarkPaid ? (
@@ -303,6 +322,11 @@ export default function InvoiceDetailPanel({ invoiceId }: { invoiceId: string })
       {pendingHint ? (
         <p className="rounded-lg border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-900 dark:border-amber-900 dark:bg-amber-950/30 dark:text-amber-200">
           {pendingHint}
+        </p>
+      ) : inv.status === "DRAFT" ? (
+        <p className="rounded-lg border border-gray-200 bg-gray-50 px-4 py-3 text-sm text-gray-700 dark:border-gray-700 dark:bg-gray-900/40 dark:text-gray-300">
+          Draft — issue to the customer portal, email, or record payment without
+          sending email.
         </p>
       ) : inv.status === "PARTIALLY_PAID" ? (
         <p className="rounded-lg border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-900 dark:border-amber-900 dark:bg-amber-950/30 dark:text-amber-200">
@@ -360,7 +384,7 @@ export default function InvoiceDetailPanel({ invoiceId }: { invoiceId: string })
                 <li className="flex gap-3">
                   <Mail className="mt-0.5 size-4 shrink-0 text-gray-400" aria-hidden />
                   <div>
-                    <p className="font-medium text-gray-900 dark:text-white">Sent</p>
+                    <p className="font-medium text-gray-900 dark:text-white">Issued</p>
                     <p className="text-gray-500">
                       {inv.sentBy?.fullName ?? "—"} · {formatInvoiceDate(inv.sentAt)}
                     </p>

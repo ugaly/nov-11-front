@@ -103,6 +103,7 @@ export default function ExportGroupFormButton({
             taskName: task.name,
             taskRoman,
             fields,
+            groups: bundle.template?.groups ?? [],
           });
         }
       } catch {

@@ -5,6 +5,7 @@ import { getApiErrorCode, getApiErrorMessage } from "@/api/errors";
 import {
   getWorkItemExecution,
   getWorkItemFieldTemplate,
+  patchWorkItemStatus,
   postWorkItemFieldFile,
   postWorkItemFormLink,
   postUseDefaultWorkItemFieldTemplate,
@@ -23,15 +24,17 @@ import {
 } from "@/lib/work-item-submission-controls";
 import type {
   WorkItemFieldDefinition,
+  WorkItemFieldGroup,
   WorkItemFieldValue,
 } from "@/api/types/work-item-template";
+import type { WorkItemStatus } from "@/api/types/template-config";
 import { apiFileToAttachment } from "@/lib/work-item-api-files";
 import { normalizeAttachmentFromApi } from "@/lib/work-item-file-utils";
 import {
   findDuplicateFieldIds,
   findInvalidAttachmentIds,
   logTemplatePutPayload,
-  prepareFieldsForTemplatePut,
+  prepareTemplateForPut,
   prepareFieldValuesForApi,
 } from "@/lib/work-item-field-store";
 import { useCallback, useEffect, useState } from "react";
@@ -53,6 +56,7 @@ export function useWorkItemFieldState(
   periodId?: string | null
 ) {
   const [fields, setFields] = useState<WorkItemFieldDefinition[]>([]);
+  const [groups, setGroups] = useState<WorkItemFieldGroup[]>([]);
   const [configuredAt, setConfiguredAt] = useState<string | null>(null);
   const [values, setValues] = useState<WorkItemFieldValue[]>([]);
   const [savedAt, setSavedAt] = useState<string | null>(null);
@@ -69,6 +73,7 @@ export function useWorkItemFieldState(
     status: import("@/api/types/template-config").WorkItemStatus | null;
   }>({ remark: null, submittedAt: null, status: null });
   const [activityLogs, setActivityLogs] = useState<WorkItemActivityLogDto[]>([]);
+  const [executionStatus, setExecutionStatus] = useState<WorkItemStatus>("PENDING");
   const [hydrated, setHydrated] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
@@ -84,6 +89,7 @@ export function useWorkItemFieldState(
       );
       const template = bundle.template;
       setFields(template?.fields ?? []);
+      setGroups(template?.groups ?? []);
       setConfiguredAt(template?.configuredAt ?? null);
       const closureValues = bundle.closure?.values;
       const valueRows =
@@ -102,10 +108,12 @@ export function useWorkItemFieldState(
         submittedAt: bundle.closure?.submittedAt ?? null,
         status: bundle.closure?.status ?? null,
       });
+      setExecutionStatus(bundle.status ?? "PENDING");
       setActivityLogs(bundle.activityLogs ?? []);
     } catch (err) {
       setError(getApiErrorMessage(err, "Could not load task fields."));
       setFields([]);
+      setGroups([]);
       setConfiguredAt(null);
       setValues([]);
       setSavedAt(null);
@@ -124,11 +132,15 @@ export function useWorkItemFieldState(
   const isConfigured = fields.length > 0 && configuredAt != null;
 
   const persistTemplate = useCallback(
-    async (next: WorkItemFieldDefinition[]) => {
+    async (
+      next: WorkItemFieldDefinition[],
+      nextGroups: WorkItemFieldGroup[] = []
+    ) => {
       if (!companyId) return;
       setError(null);
       try {
         let serverFields: WorkItemFieldDefinition[] = [];
+        let serverGroups: WorkItemFieldGroup[] = [];
         let from404 = false;
         try {
           const current = await getWorkItemFieldTemplate(
@@ -138,13 +150,14 @@ export function useWorkItemFieldState(
             periodId
           );
           serverFields = current.fields ?? [];
+          serverGroups = current.groups ?? [];
         } catch (fetchErr) {
           if (
             axios.isAxiosError(fetchErr) &&
             fetchErr.response?.status === 404
           ) {
-            // No template yet — treat every field as new (fresh UUIDs on PUT).
             serverFields = [];
+            serverGroups = [];
             from404 = true;
           } else {
             throw fetchErr;
@@ -162,8 +175,13 @@ export function useWorkItemFieldState(
           throw new Error(msg);
         }
 
-        const fieldsForApi = prepareFieldsForTemplatePut(serverFields, next);
-        logTemplatePutPayload(workItemId, fieldsForApi, {
+        const prepared = prepareTemplateForPut(
+          serverFields,
+          serverGroups,
+          next,
+          nextGroups
+        );
+        logTemplatePutPayload(workItemId, prepared.fields, {
           serverFieldCount: serverFields.length,
           from404,
         });
@@ -172,10 +190,11 @@ export function useWorkItemFieldState(
           companyId,
           engagementId,
           workItemId,
-          { fields: fieldsForApi },
+          prepared,
           periodId
         );
         setFields(res.fields);
+        setGroups(res.groups ?? []);
         setConfiguredAt(res.configuredAt);
         if (res.formLink) setFormLink(res.formLink);
         await reload();
@@ -208,6 +227,7 @@ export function useWorkItemFieldState(
         periodId
       );
       setFields(res.fields);
+      setGroups(res.groups ?? []);
       setConfiguredAt(res.configuredAt);
       if (res.formLink) setFormLink(res.formLink);
       await reload();
@@ -347,8 +367,33 @@ export function useWorkItemFieldState(
     responsesLocked,
   });
 
+  const updateExecutionStatus = useCallback(
+    async (status: WorkItemStatus) => {
+      if (!companyId) return false;
+      setError(null);
+      const previous = executionStatus;
+      setExecutionStatus(status);
+      try {
+        await patchWorkItemStatus(
+          companyId,
+          engagementId,
+          workItemId,
+          { status },
+          periodId
+        );
+        return true;
+      } catch (err) {
+        setExecutionStatus(previous);
+        setError(getApiErrorMessage(err, "Could not update status."));
+        return false;
+      }
+    },
+    [companyId, engagementId, executionStatus, periodId, workItemId]
+  );
+
   return {
     fields,
+    groups,
     values,
     configuredAt,
     savedAt,
@@ -371,5 +416,7 @@ export function useWorkItemFieldState(
     reload,
     closureInitial,
     activityLogs,
+    executionStatus,
+    updateExecutionStatus,
   };
 }

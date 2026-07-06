@@ -1,4 +1,5 @@
 export type ReminderSchedule =
+  | "TWO_DAYS_BEFORE"
   | "ONE_WEEK_BEFORE"
   | "TWO_WEEKS_BEFORE"
   | "ONE_MONTH_BEFORE"
@@ -15,7 +16,7 @@ export type ReminderEntry = {
   note?: string;
 };
 
-export type ReminderReferenceKind = "due" | "expense";
+export type ReminderReferenceKind = "due" | "expense" | "engagement";
 
 export function newReminderId(): string {
   return `rem_${Date.now()}_${Math.random().toString(36).slice(2, 7)}`;
@@ -68,7 +69,9 @@ export function sanitizeReminders(items: ReminderEntry[]): ReminderEntry[] {
 }
 
 export function referenceDateLabel(kind: ReminderReferenceKind): string {
-  return kind === "expense" ? "expense date" : "due date";
+  if (kind === "expense") return "expense date";
+  if (kind === "engagement") return "period end date";
+  return "due date";
 }
 
 export function reminderScheduleOptions(
@@ -76,6 +79,7 @@ export function reminderScheduleOptions(
 ): { value: ReminderSchedule; label: string }[] {
   const ref = referenceDateLabel(kind);
   return [
+    { value: "TWO_DAYS_BEFORE", label: `2 days before ${ref}` },
     { value: "ONE_WEEK_BEFORE", label: `1 week before ${ref}` },
     { value: "TWO_WEEKS_BEFORE", label: `2 weeks before ${ref}` },
     { value: "ONE_MONTH_BEFORE", label: `1 month before ${ref}` },
@@ -127,6 +131,9 @@ export function resolveReminderDateTime(
   at.setHours(9, 0, 0, 0);
 
   switch (normalized.schedule) {
+    case "TWO_DAYS_BEFORE":
+      at.setDate(at.getDate() - 2);
+      return formatDateTimeLocal(at);
     case "ONE_WEEK_BEFORE":
       at.setDate(at.getDate() - 7);
       return formatDateTimeLocal(at);

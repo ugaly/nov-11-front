@@ -1,6 +1,7 @@
 import type {
   CustomerFieldKey,
   WorkItemFieldDefinition,
+  WorkItemFieldGroup,
   WorkItemFieldValue,
   WorkItemFileAttachment,
 } from "@/api/types/work-item-template";
@@ -52,6 +53,7 @@ export interface WorkItemFieldTemplateResponse {
   configuredAt: string | null;
   configuredByUserId?: string | null;
   version: number;
+  groups?: WorkItemFieldGroup[];
   fields: WorkItemFieldDefinition[];
   formLink: WorkItemFormLinkSummaryDto | null;
 }
@@ -106,6 +108,7 @@ export interface SaveFieldValuesRequest {
 }
 
 export interface PutFieldTemplateRequest {
+  groups?: WorkItemFieldGroup[];
   fields: WorkItemFieldDefinition[];
 }
 
@@ -148,6 +151,7 @@ export interface PublicFormStepDto {
   edited: boolean;
   publicSubmitEnabled?: boolean;
   readOnly: boolean;
+  groups?: WorkItemFieldGroup[];
   fields: WorkItemFieldDefinition[];
   values: WorkItemFieldValue[];
   skipReason?: string | null;
@@ -164,6 +168,7 @@ export interface PublicWorkItemFormResponse {
   enabled: boolean;
   readOnly: boolean;
   workItemId?: string;
+  groups?: WorkItemFieldGroup[];
   fields?: WorkItemFieldDefinition[];
   values?: WorkItemFieldValue[];
   steps?: PublicFormStepDto[];

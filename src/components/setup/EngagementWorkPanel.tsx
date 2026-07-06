@@ -436,22 +436,14 @@ export default function EngagementWorkPanel({
                   : null
               }
               engagementId={engagement.id}
-              status={getStatus(task)}
-              onStatusChange={(s) => {
+              onStatusChanged={(s) => {
                 if (ctx.groupKey) {
                   setExpandedGroups((prev) => ({
                     ...prev,
                     [ctx.groupKey!]: true,
                   }));
                 }
-                void (async () => {
-                  const ok = await setStatus(task.id, s);
-                  if (ok) {
-                    showSuccess(`Status updated to ${statusLabel(s)}`);
-                  } else {
-                    showError("Failed to update task status");
-                  }
-                })();
+                showSuccess(`Status updated to ${statusLabel(s)}`);
               }}
               onTaskUpdated={onEngagementRefresh}
             />
@@ -583,8 +575,7 @@ function TaskWorkCard({
   companyName,
   groupLabel,
   engagementId,
-  status,
-  onStatusChange,
+  onStatusChanged,
   onTaskUpdated,
 }: {
   companyId: string;
@@ -595,8 +586,7 @@ function TaskWorkCard({
   companyName: string;
   groupLabel: string | null;
   engagementId: string;
-  status: WorkItemStatus;
-  onStatusChange: (status: WorkItemStatus) => void;
+  onStatusChanged?: (status: WorkItemStatus) => void;
   onTaskUpdated?: () => void | Promise<void>;
 }) {
   const [builderOpen, setBuilderOpen] = useState(false);
@@ -605,12 +595,16 @@ function TaskWorkCard({
   const [builderSeedFields, setBuilderSeedFields] = useState<
     import("@/api/types/work-item-template").WorkItemFieldDefinition[] | null
   >(null);
+  const [builderSeedGroups, setBuilderSeedGroups] = useState<
+    import("@/api/types/work-item-template").WorkItemFieldGroup[] | null
+  >(null);
   const [collapsed, setCollapsed] = useState<boolean>(
     () => loadCollapsedTasks(engagementId)[task.id] ?? true
   );
   const { showError, showSuccess } = useToast();
   const {
     fields,
+    groups,
     values,
     savedAt,
     hydrated,
@@ -631,9 +625,11 @@ function TaskWorkCard({
     reload: reloadFields,
     closureInitial,
     activityLogs,
+    executionStatus,
+    updateExecutionStatus,
   } = useWorkItemFieldState(companyId, engagementId, task.id, periodId);
 
-  const closureMode = isClosureStatus(status);
+  const closureMode = isClosureStatus(executionStatus);
   const {
     files: outputFiles,
     loading: outputFilesLoading,
@@ -642,7 +638,7 @@ function TaskWorkCard({
     reload: reloadOutputFiles,
     uploadFile: uploadOutputFile,
     removeFile: removeOutputFile,
-  } = useWorkItemOutputFiles(companyId, engagementId, task.id, {
+  } = useWorkItemOutputFiles(companyId, engagementId, task.id, periodId, {
     enabled: closureMode,
   });
 
@@ -663,7 +659,7 @@ function TaskWorkCard({
     setRemark,
     submitClosure,
     reopenClosure,
-  } = useWorkItemClosure(engagementId, task.id, status, companyId, periodId, {
+  } = useWorkItemClosure(engagementId, task.id, executionStatus, companyId, periodId, {
     initialClosure: closureInitial,
     // Keep closure UX in-place (no full engagement refresh / scroll jump).
     onAfterSubmit: () => afterMutation(false),
@@ -687,6 +683,7 @@ function TaskWorkCard({
 
   const fieldFormProps = {
     fields,
+    groups,
     values,
     savedAt,
     workItemId: task.id,
@@ -706,8 +703,9 @@ function TaskWorkCard({
     task,
     groupLabel,
     fields,
+    groups,
     values,
-    status,
+    status: executionStatus,
     closureRemark: closure.remark,
     closureSubmittedAt: closure.submittedAt,
     outputFiles,
@@ -720,11 +718,11 @@ function TaskWorkCard({
   });
 
   const cardToneClass =
-    status === "IN_PROGRESS"
+    executionStatus === "IN_PROGRESS"
       ? "bg-amber-50/35 dark:bg-amber-950/10"
-      : status === "DONE"
+      : executionStatus === "DONE"
         ? "bg-emerald-50/35 dark:bg-emerald-950/10"
-        : status === "BLOCKED" || status === "NOT_APPLICABLE"
+        : executionStatus === "BLOCKED" || executionStatus === "NOT_APPLICABLE"
           ? "bg-rose-50/30 dark:bg-rose-950/10"
           : "bg-white dark:bg-gray-900/20";
 
@@ -737,6 +735,7 @@ function TaskWorkCard({
         task.catalogNodeId
       );
       setBuilderSeedFields(res.fields ?? []);
+      setBuilderSeedGroups(res.groups ?? []);
       setBuilderOpen(true);
     } catch {
       showError("No default form configured for this task type");
@@ -777,7 +776,19 @@ function TaskWorkCard({
             {hasExportData ? (
               <TaskSectionExportMenu input={exportInput} />
             ) : null}
-            <TaskStatusPicker value={status} onChange={onStatusChange} />
+            <TaskStatusPicker
+              value={executionStatus}
+              onChange={(s) => {
+                void (async () => {
+                  const ok = await updateExecutionStatus(s);
+                  if (ok) {
+                    onStatusChanged?.(s);
+                  } else {
+                    showError("Failed to update task status");
+                  }
+                })();
+              }}
+            />
           </div>
         </div>
 
@@ -791,13 +802,14 @@ function TaskWorkCard({
             <p className="mb-2 text-xs text-error-600">{closureError}</p>
           ) : null}
 
-          {showSummary && isClosureStatus(status) ? (
+          {showSummary && isClosureStatus(executionStatus) ? (
             <>
               <TaskClosureSummary
-                status={status as ClosureStatus}
-                remark={closure.remark}
+                status={executionStatus as ClosureStatus}
+                remark={closure.remark || closureInitial.remark || ""}
                 submittedAt={closure.submittedAt!}
                 fields={fields}
+                groups={groups}
                 values={values}
                 outputFiles={outputFiles}
                 onReopen={() => void reopenClosure()}
@@ -815,8 +827,9 @@ function TaskWorkCard({
                 />
               ) : null}
               <TaskClosureForm
-              status={status as ClosureStatus}
+              status={executionStatus as ClosureStatus}
               fields={fields}
+              groups={groups}
               values={values}
               savedAt={savedAt}
               workItemId={task.id}
@@ -825,12 +838,13 @@ function TaskWorkCard({
               onRemarkChange={setRemark}
               onSaveValues={() => {}}
               onSubmit={async (nextValues, remark) => {
-                await submitClosure(
-                  status as ClosureStatus,
+        await submitClosure(
+                  executionStatus as ClosureStatus,
                   remark,
                   prepareFieldValuesForApi(nextValues, fields),
                   outputFiles.map((f) => f.id)
                 );
+                await reloadFields();
               }}
               onEditFields={
                 isConfigured ? () => setBuilderOpen(true) : undefined
@@ -916,13 +930,16 @@ function TaskWorkCard({
         onClose={() => {
           setBuilderOpen(false);
           setBuilderSeedFields(null);
+          setBuilderSeedGroups(null);
         }}
         taskName={task.name}
         initialFields={builderSeedFields ?? fields}
-        onSave={async (next) => {
-          await persistTemplate(next);
+        initialGroups={builderSeedGroups ?? groups}
+        onSave={async ({ fields: nextFields, groups: nextGroups }) => {
+          await persistTemplate(nextFields, nextGroups);
           await afterMutation(true);
           setBuilderSeedFields(null);
+          setBuilderSeedGroups(null);
         }}
       />
     </>

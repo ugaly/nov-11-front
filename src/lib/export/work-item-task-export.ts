@@ -20,6 +20,8 @@ import {
   slugifyFilename,
 } from "@/lib/export/pdf-document";
 import { formatFieldValueForExport } from "@/lib/export/work-item-field-format";
+import { isFileWidget } from "@/lib/field-widget-meta";
+import { buildFieldLayout } from "@/lib/work-item-field-layout";
 import { formatEngagementPeriod } from "@/lib/template-recurrence";
 import { getAttachments } from "@/lib/work-item-file-utils";
 import { statusLabel } from "@/components/setup/TaskStatusPicker";
@@ -47,6 +49,7 @@ export function customerForTaskExport(
     country: null,
     notes: null,
     active: true,
+    sendWelcomeEmail: true,
   };
 }
 
@@ -57,6 +60,7 @@ export type WorkItemTaskExportInput = {
   task: EngagementWorkItemResponse;
   groupLabel?: string | null;
   fields: WorkItemFieldDefinition[];
+  groups?: import("@/api/types/work-item-template").WorkItemFieldGroup[];
   values: WorkItemFieldValue[];
   status: WorkItemStatus;
   closureRemark?: string | null;
@@ -125,10 +129,20 @@ function engagementRows(
 
 function fieldResponseRows(
   fields: WorkItemFieldDefinition[],
-  values: WorkItemFieldValue[]
+  values: WorkItemFieldValue[],
+  groups: import("@/api/types/work-item-template").WorkItemFieldGroup[] = []
 ): string[][] {
   const map = Object.fromEntries(values.map((v) => [v.fieldId, v]));
-  return fields.map((f) => [f.label, formatFieldValueForExport(f, map[f.id])]);
+  const rows: string[][] = [];
+  for (const section of buildFieldLayout(fields, groups)) {
+    if (section.kind === "group" && section.group?.name) {
+      rows.push([section.group.name, ""]);
+    }
+    for (const field of section.fields) {
+      rows.push([field.label, formatFieldValueForExport(field, map[field.id])]);
+    }
+  }
+  return rows;
 }
 
 function collectAttachments(input: WorkItemTaskExportInput): LabeledAttachment[] {
@@ -136,7 +150,7 @@ function collectAttachments(input: WorkItemTaskExportInput): LabeledAttachment[]
   const map = Object.fromEntries(input.values.map((v) => [v.fieldId, v]));
 
   for (const field of input.fields) {
-    if (field.widget !== "FILE") continue;
+    if (!isFileWidget(field.widget)) continue;
     for (const file of getAttachments(map[field.id])) {
       if (file.url || file.dataUrl) {
         out.push({ section: field.label, file });
@@ -356,7 +370,7 @@ export async function exportWorkItemTaskPdf(
     y = addPdfTable(doc, y, {
       title: "Captured responses",
       head: [["Field", "Value"]],
-      body: fieldResponseRows(input.fields, input.values),
+      body: fieldResponseRows(input.fields, input.values, input.groups ?? []),
     });
   }
 
@@ -454,7 +468,7 @@ export function exportWorkItemTaskExcel(input: WorkItemTaskExportInput): void {
     {
       name: "Responses",
       headers: ["Field", "Value"],
-      rows: fieldResponseRows(input.fields, input.values),
+      rows: fieldResponseRows(input.fields, input.values, input.groups ?? []),
     },
     {
       name: "Closure",

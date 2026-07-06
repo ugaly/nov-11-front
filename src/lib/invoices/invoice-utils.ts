@@ -3,7 +3,7 @@ import type { InvoiceListFilters } from "@/lib/invoices/invoice-types";
 
 export const INVOICE_STATUS_LABELS: Record<InvoiceWorkflowStatus, string> = {
   DRAFT: "Draft",
-  SENT: "Sent",
+  SENT: "Issued",
   PARTIALLY_PAID: "Partially paid",
   PAID: "Paid",
   VOID: "Void",

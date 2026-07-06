@@ -5,7 +5,7 @@ import { Check } from "lucide-react";
 
 const WORKFLOW_STEPS: { status: InvoiceWorkflowStatus; label: string }[] = [
   { status: "DRAFT", label: "Draft" },
-  { status: "SENT", label: "Sent" },
+  { status: "SENT", label: "Issued" },
   { status: "PARTIALLY_PAID", label: "Partial" },
   { status: "PAID", label: "Paid" },
 ];

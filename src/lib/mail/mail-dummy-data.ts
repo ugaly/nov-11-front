@@ -1,4 +1,4 @@
-import type { MailHistoryRow, MailTemplate } from "@/lib/mail/mail-types";
+import type { MailHistoryRow, MailTemplate } from "@/api/types/mail";
 
 export const MAIL_TEMPLATES: MailTemplate[] = [
   {
@@ -28,6 +28,20 @@ export const MAIL_TEMPLATES: MailTemplate[] = [
     subject: "Request for supporting documents",
     body:
       "Hello,\n\nTo continue processing your request, please provide the required supporting documents.\nYou can reply directly to this message with the requested details.\n\nThank you.",
+  },
+  {
+    id: "customer-welcome",
+    name: "Customer welcome",
+    subject: "Welcome to our services",
+    body:
+      "Hello,\n\nWelcome! We are pleased to have you with us.\nYou have joined us for your selected service.\nOur team will be in touch if anything else is needed.\n\nThank you for choosing us.",
+  },
+  {
+    id: "customer-new-service",
+    name: "New service congratulations",
+    subject: "Thank you for choosing our new service",
+    body:
+      "Hello,\n\nCongratulations on joining our new service with us.\nWe look forward to supporting you.\n\nThank you for continuing to work with us.",
   },
 ];
 

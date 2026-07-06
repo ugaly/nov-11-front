@@ -11,12 +11,26 @@ import {
   isClosureStatus,
   type ClosureStatus,
 } from "@/lib/work-item-closure-store";
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 
 export interface WorkItemClosureView {
   remark: string;
   submittedAt: string | null;
   submittedStatus: WorkItemStatus | null;
+}
+
+function mergeRemark(
+  fromServer: string | null | undefined,
+  previous: string,
+  lastSubmitted: string
+): string {
+  if (fromServer != null && fromServer.trim() !== "") {
+    return fromServer;
+  }
+  if (lastSubmitted.trim() !== "") {
+    return lastSubmitted;
+  }
+  return previous;
 }
 
 export function useWorkItemClosure(
@@ -34,6 +48,7 @@ export function useWorkItemClosure(
     onAfterSubmit?: () => void | Promise<void>;
   } = {}
 ) {
+  const lastSubmittedRemarkRef = useRef("");
   const [closure, setClosure] = useState<WorkItemClosureView>({
     remark: options.initialClosure?.remark ?? "",
     submittedAt: options.initialClosure?.submittedAt ?? null,
@@ -46,11 +61,14 @@ export function useWorkItemClosure(
     setClosure((prev) => {
       const submittedAt =
         options.initialClosure?.submittedAt ?? prev.submittedAt;
-      const fromServer = options.initialClosure?.remark;
-      const remark =
-        submittedAt != null
-          ? (fromServer ?? prev.remark ?? "")
-          : (fromServer ?? prev.remark ?? "");
+      const remark = mergeRemark(
+        options.initialClosure?.remark,
+        prev.remark,
+        lastSubmittedRemarkRef.current
+      );
+      if (remark.trim()) {
+        lastSubmittedRemarkRef.current = remark;
+      }
       return {
         remark,
         submittedAt,
@@ -84,6 +102,7 @@ export function useWorkItemClosure(
       !isClosureStatus(currentStatus) ||
       closure.submittedStatus !== currentStatus
     ) {
+      lastSubmittedRemarkRef.current = "";
       setClosure({
         remark: "",
         submittedAt: null,
@@ -111,6 +130,7 @@ export function useWorkItemClosure(
     ) => {
       if (!companyId) return;
       setError(null);
+      const trimmed = remark.trim();
       try {
         const res = await postWorkItemClosure(
           companyId,
@@ -118,15 +138,16 @@ export function useWorkItemClosure(
           workItemId,
           {
             status,
-            remark: remark.trim(),
+            remark: trimmed,
             values,
             outputFileIds,
           },
           periodId
         );
-        const trimmed = remark.trim();
+        const savedRemark = res.remark ?? trimmed;
+        lastSubmittedRemarkRef.current = savedRemark;
         setClosure({
-          remark: res.remark ?? trimmed,
+          remark: savedRemark,
           submittedAt: res.submittedAt,
           submittedStatus: res.status ?? status,
         });
@@ -150,8 +171,9 @@ export function useWorkItemClosure(
         {},
         periodId
       );
+      lastSubmittedRemarkRef.current = "";
       setClosure({
-        remark: closure.remark,
+        remark: "",
         submittedAt: null,
         submittedStatus: null,
       });
@@ -160,7 +182,7 @@ export function useWorkItemClosure(
       setError(getApiErrorMessage(err, "Could not reopen closure."));
       throw err;
     }
-  }, [closure.remark, companyId, engagementId, options, periodId, workItemId]);
+  }, [companyId, engagementId, options, periodId, workItemId]);
 
   return {
     closure,
